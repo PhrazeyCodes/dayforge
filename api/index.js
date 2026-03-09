@@ -9,7 +9,6 @@ export default async function handler(req, res) {
     const htmlPath = join(__dirname, '..', 'public', 'index.html');
     let html = readFileSync(htmlPath, 'utf8');
 
-    // Inject public env vars needed by client-side Supabase SDK
     const envScript = `<script>
 window.SUPABASE_URL = ${JSON.stringify(process.env.SUPABASE_URL || '')};
 window.SUPABASE_ANON_KEY = ${JSON.stringify(process.env.SUPABASE_ANON_KEY || '')};
