@@ -1,21 +1,26 @@
-const fs = require('fs');
-const path = require('path');
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-export default function handler(req, res) {
-  const clientId = process.env.STRAVA_CLIENT_ID || '';
-  const filePath = path.join(process.cwd(), 'public', 'index.html');
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-  let html;
+export default async function handler(req, res) {
   try {
-    html = fs.readFileSync(filePath, 'utf8');
-  } catch (e) {
-    return res.status(500).send('Could not load app');
+    const htmlPath = join(__dirname, '..', 'public', 'index.html');
+    let html = readFileSync(htmlPath, 'utf8');
+
+    // Inject public env vars needed by client-side Supabase SDK
+    const envScript = `<script>
+window.SUPABASE_URL = ${JSON.stringify(process.env.SUPABASE_URL || '')};
+window.SUPABASE_ANON_KEY = ${JSON.stringify(process.env.SUPABASE_ANON_KEY || '')};
+window.STRAVA_CLIENT_ID = ${JSON.stringify(process.env.STRAVA_CLIENT_ID || '')};
+</script>`;
+    html = html.replace('</head>', envScript + '\n</head>');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.status(200).send(html);
+  } catch (err) {
+    res.status(500).send('Server error: ' + err.message);
   }
-
-  // Inject the Strava client ID (same as the old Netlify edge function)
-  html = html.replace("'{{STRAVA_CLIENT_ID}}'", JSON.stringify(clientId));
-
-  res.setHeader('Content-Type', 'text/html');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  return res.status(200).send(html);
 }

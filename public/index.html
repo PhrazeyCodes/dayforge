@@ -1533,7 +1533,24 @@ init();
 // ── AUTH & CLOUD SYNC ──
 var currentUser = null;
 var syncTimeout = null;
-var userMenuOpen = false;
+var supabaseClient = null;
+var accessToken = null;
+
+// ── Load Supabase SDK from CDN ──
+(function() {
+  var script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+  script.onload = function() { bootAuth(); };
+  script.onerror = function() { showSignIn(); showToast('Failed to load auth library'); };
+  document.head.appendChild(script);
+})();
+
+function getSupabaseCreds() {
+  return {
+    url: window.SUPABASE_URL || '',
+    key: window.SUPABASE_ANON_KEY || ''
+  };
+}
 
 function showSyncIndicator(state) {
   var el = document.getElementById('sync-indicator');
@@ -1554,12 +1571,12 @@ function showSyncIndicator(state) {
 }
 
 async function cloudSave() {
-  if (!currentUser) return;
+  if (!accessToken) return;
   showSyncIndicator('saving');
   try {
     var res = await fetch('/api/data', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
       body: JSON.stringify({ state: S })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -1569,28 +1586,31 @@ async function cloudSave() {
   }
 }
 
-// Override saveState to also trigger cloud sync
-var _originalSaveState = saveState;
-saveState = function() {
-  _originalSaveState();
-  clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(cloudSave, 800); // debounce 800ms
-};
-
 async function cloudLoad() {
+  if (!accessToken) return null;
   try {
-    var res = await fetch('/api/data');
+    var res = await fetch('/api/data', {
+      headers: { 'Authorization': 'Bearer ' + accessToken }
+    });
     if (!res.ok) return null;
     var data = await res.json();
     return data.state;
   } catch (e) { return null; }
 }
 
+// Override saveState to also cloud sync
+var _origSave = saveState;
+saveState = function() {
+  _origSave();
+  clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(cloudSave, 800);
+};
+
 function renderUserAvatar(user) {
   var container = document.getElementById('user-avatar-container');
   if (!container) return;
   if (user.avatar) {
-    container.innerHTML = '<img class="user-avatar" id="user-avatar" src="' + esc(user.avatar) + '" alt="' + esc(user.name) + '" title="' + esc(user.name) + '"/>';
+    container.innerHTML = '<img class="user-avatar" id="user-avatar" src="' + esc(user.avatar) + '" alt="' + esc(user.name) + '"/>';
   } else {
     var initials = (user.name || user.email || '?').charAt(0).toUpperCase();
     container.innerHTML = '<div class="user-avatar-fallback" id="user-avatar">' + initials + '</div>';
@@ -1603,55 +1623,27 @@ function renderUserAvatar(user) {
 
 function toggleUserMenu(user) {
   var existing = document.getElementById('user-menu');
-  if (existing) { existing.remove(); userMenuOpen = false; return; }
-  userMenuOpen = true;
+  if (existing) { existing.remove(); return; }
   var menu = document.createElement('div');
-  menu.className = 'user-menu';
-  menu.id = 'user-menu';
+  menu.className = 'user-menu'; menu.id = 'user-menu';
   menu.innerHTML = '<div class="user-menu-email">' + esc(user.email) + '</div>'
     + '<div style="height:1px;background:var(--border);margin:4px 0"></div>'
     + '<button class="user-menu-item" id="um-sync"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg> Sync now</button>'
     + '<button class="user-menu-item" id="um-logout" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Sign out</button>';
   document.getElementById('user-avatar-container').appendChild(menu);
   document.getElementById('um-sync').addEventListener('click', function() { menu.remove(); cloudSave(); });
-  document.getElementById('um-logout').addEventListener('click', function() { window.location.href = '/api/auth?action=logout'; });
+  document.getElementById('um-logout').addEventListener('click', async function() {
+    if (supabaseClient) await supabaseClient.auth.signOut();
+    window.location.reload();
+  });
   setTimeout(function() {
-    document.addEventListener('click', function dismissMenu(e) {
+    document.addEventListener('click', function dismiss(e) {
       if (!e.target.closest('#user-menu') && !e.target.closest('#user-avatar')) {
         var m = document.getElementById('user-menu'); if (m) m.remove();
-        document.removeEventListener('click', dismissMenu);
+        document.removeEventListener('click', dismiss);
       }
     });
   }, 10);
-}
-
-async function bootAuth() {
-  // Check if user is signed in
-  try {
-    var res = await fetch('/api/auth?action=me');
-    if (!res.ok) { showSignIn(); return; }
-    var data = await res.json();
-    if (!data.user) { showSignIn(); return; }
-    currentUser = data.user;
-  } catch (e) { showSignIn(); return; }
-
-  // Load cloud state
-  var cloudState = await cloudLoad();
-  if (cloudState) {
-    // Merge cloud state into S, cloud wins
-    S = Object.assign(JSON.parse(JSON.stringify(DEFAULT_S)), cloudState);
-  }
-
-  showApp();
-  renderUserAvatar(currentUser);
-
-  // Re-render with loaded data
-  document.getElementById('tb-streak').textContent = S.streak;
-  var q = QUOTES[today.getDate() % QUOTES.length];
-  var sq = document.getElementById('sidebar-quote');
-  if (sq) sq.innerHTML = '"' + q.q + '"<div style="margin-top:4px;font-family:var(--mono);font-size:9px;color:var(--text3);font-style:normal;letter-spacing:.4px">— ' + q.a + '</div>';
-  renderCal();
-  renderTab();
 }
 
 function showSignIn() {
@@ -1664,29 +1656,80 @@ function showApp() {
   document.getElementById('app-shell').style.display = 'grid';
 }
 
-// Google sign-in button
-document.getElementById('signin-google-btn').addEventListener('click', function() {
-  window.location.href = '/api/auth?action=login';
+async function launchApp(session) {
+  accessToken = session.access_token;
+  var u = session.user;
+  currentUser = {
+    id: u.id,
+    email: u.email,
+    name: u.user_metadata?.full_name || u.email,
+    avatar: u.user_metadata?.avatar_url || null
+  };
+
+  // Load cloud state — cloud wins over any local state
+  var cloudState = await cloudLoad();
+  if (cloudState) {
+    S = Object.assign(JSON.parse(JSON.stringify(DEFAULT_S)), cloudState);
+  }
+
+  showApp();
+  renderUserAvatar(currentUser);
+  document.getElementById('tb-streak').textContent = S.streak;
+  var q = QUOTES[today.getDate() % QUOTES.length];
+  var sq = document.getElementById('sidebar-quote');
+  if (sq) sq.innerHTML = '"' + q.q + '"<div style="margin-top:4px;font-family:var(--mono);font-size:9px;color:var(--text3);font-style:normal;letter-spacing:.4px">— ' + q.a + '</div>';
+  renderCal();
+  renderTab();
+}
+
+async function bootAuth() {
+  var creds = getSupabaseCreds();
+  if (!creds.url || !creds.key) {
+    showSignIn();
+    showToast('Set SUPABASE_URL and SUPABASE_ANON_KEY in Vercel env vars');
+    return;
+  }
+
+  supabaseClient = window.supabase.createClient(creds.url, creds.key);
+
+  // Listen for auth state changes (handles redirect callback automatically)
+  supabaseClient.auth.onAuthStateChange(async function(event, session) {
+    if (event === 'SIGNED_IN' && session) {
+      // Clean up URL if coming from OAuth redirect
+      if (window.location.hash || window.location.search.includes('code=')) {
+        window.history.replaceState({}, '', '/');
+      }
+      await launchApp(session);
+    } else if (event === 'SIGNED_OUT' || !session) {
+      currentUser = null;
+      accessToken = null;
+      showSignIn();
+    } else if (event === 'TOKEN_REFRESHED' && session) {
+      accessToken = session.access_token;
+    }
+  });
+
+  // Check for existing session
+  var { data: { session } } = await supabaseClient.auth.getSession();
+  if (session) {
+    await launchApp(session);
+  } else {
+    showSignIn();
+  }
+}
+
+// Google sign-in button — uses Supabase client-side OAuth
+document.getElementById('signin-google-btn').addEventListener('click', async function() {
+  if (!supabaseClient) { showToast('Auth not ready, try again'); return; }
+  var { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin + '/',
+      scopes: 'openid email profile',
+    }
+  });
+  if (error) showToast('Sign-in error: ' + error.message);
 });
-
-// Handle auth redirect params
-(function() {
-  var params = new URLSearchParams(window.location.search);
-  if (params.get('auth') === 'error') {
-    var reason = params.get('reason') || 'unknown error';
-    window.history.replaceState({}, '', '/');
-    // Show sign-in with error
-    setTimeout(function() {
-      showToast('Sign-in failed: ' + reason);
-    }, 500);
-  }
-  if (params.get('auth') === 'success') {
-    window.history.replaceState({}, '', '/');
-  }
-})();
-
-// Boot the auth flow
-bootAuth();
 </script>
 </body>
 </html>
