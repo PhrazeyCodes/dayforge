@@ -1036,6 +1036,13 @@ function tplNutrition(){
       +'<button class="btn btn-red" data-del-weight="'+dk3+'">✕</button></div>';
   }).join('');
 
+  // ── Calories burned (from fitness sessions + manual health)
+  var healthDay=S.healthByDate&&S.healthByDate[dateKey(selDate)]||{};
+  var sessionBurnedToday=healthDay.sessionBurned||0;
+  var manualBurnedToday=healthDay.burned||0;
+  var totalBurnedToday=manualBurnedToday>0&&sessionBurnedToday>0?manualBurnedToday+sessionBurnedToday:Math.max(manualBurnedToday,sessionBurnedToday);
+  var netCalories=t.cal-totalBurnedToday;
+
   return'<div style="display:flex;flex-direction:column;gap:14px;max-width:680px">'
 
   // ── Nutrition Coach Card ──
@@ -1137,11 +1144,29 @@ function tplNutrition(){
   +'<div style="display:flex;align-items:center;gap:10px">'
   +'<div class="cicon" style="background:linear-gradient(135deg,rgba(214,62,90,.12),rgba(232,98,42,.08))"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 4-3 6-7 6s-7-2-7-6a7 7 0 0 1 7-7z"/><path d="M5 15h14l-1.5 5.5a2 2 0 0 1-1.93 1.5H8.43a2 2 0 0 1-1.93-1.5L5 15z"/></svg></div>'
   +'<div><div class="ctitle">'+dateLabel+'</div>'
-  +'<div class="csub">'+t.cal+' / '+calGoal+' kcal · '+(calOver>0?'<span style="color:var(--red)">'+calOver+' over</span>':calRem+' remaining')+'</div>'
+  +'<div class="csub">'+t.cal+' eaten / '+calGoal+' goal · '+(calOver>0?'<span style="color:var(--red)">'+calOver+' over</span>':calRem+' remaining')+'</div>'
   +'</div></div></div>'
   +'<div class="cbar"><div class="cbar-fill" style="width:'+Math.min(100,calPct)+'%;background:'+(calOver>0?'var(--red)':'var(--grd)')+'"></div></div>'
-  +'<div class="cbar-lbls"><span>0</span><span>'+calGoal+' kcal</span></div>'
-  +(meals.length?'<div class="rings" style="margin-top:8px">'+ringsHTML(t)+'</div>':'<div style="text-align:center;padding:10px 0;font-family:var(--mono);font-size:11px;color:var(--text3)">No meals logged yet</div>')
+  +'<div class="cbar-lbls"><span>0</span><span>'+calGoal+' kcal goal</span></div>'
+  // Burned + Net row
+  +(totalBurnedToday>0
+    ?'<div style="display:flex;gap:0;margin-top:10px;border:1px solid var(--border);border-radius:12px;overflow:hidden">'
+      +'<div style="flex:1;padding:10px 12px;text-align:center;border-right:1px solid var(--border)">'
+      +'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">Eaten</div>'
+      +'<div style="font-family:var(--display);font-size:16px;font-weight:800;color:var(--accent)">'+t.cal+'</div>'
+      +'</div>'
+      +'<div style="flex:1;padding:10px 12px;text-align:center;border-right:1px solid var(--border)">'
+      +'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">Burned</div>'
+      +'<div style="font-family:var(--display);font-size:16px;font-weight:800;color:var(--red)">'+totalBurnedToday+'</div>'
+      +'</div>'
+      +'<div style="flex:1;padding:10px 12px;text-align:center">'
+      +'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">Net</div>'
+      +'<div style="font-family:var(--display);font-size:16px;font-weight:800;color:'+(netCalories>calGoal?'var(--red)':netCalories<0?'var(--green)':'var(--text)')+'">'+netCalories+'</div>'
+      +'</div>'
+      +'</div>'
+      +'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:6px;letter-spacing:.2px">Net = calories eaten − burned · '+(sessionBurnedToday>0?'🤖 AI estimated from workouts':'manual health entry')+'</div>'
+    :'')
+  +(meals.length?'<div class="rings" style="margin-top:12px">'+ringsHTML(t)+'</div>':'<div style="text-align:center;padding:10px 0;font-family:var(--mono);font-size:11px;color:var(--text3)">No meals logged yet</div>')
   +'</div>'
 
   // ── AI Scan Hero ──
@@ -1233,10 +1258,13 @@ function tplFitness(){
     +'<button class="btn btn-primary" id="log-btn" style="margin-top:0">log session</button></div>'):'';
 
   var sCards=daySessions.length?daySessions.map(function(s){
+    var burnBadge=s.caloriesBurned
+      ?'<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--red);background:rgba(214,62,90,.08);border:1px solid rgba(214,62,90,.15);padding:2px 8px;border-radius:8px">🔥 '+s.caloriesBurned+' kcal</span>'
+      :(s.estimating?'<span style="font-family:var(--mono);font-size:10px;color:var(--text3);padding:2px 8px">estimating...</span>':'<button class="btn btn-sm" data-est-session="'+s.id+'" style="background:rgba(232,98,42,.07);color:var(--accent);border:1px solid rgba(232,98,42,.2);font-size:10px;padding:3px 9px">estimate burn</button>');
     return'<div class="scard"><div class="scard-head">'
-      +'<div><div style="display:flex;align-items:center;gap:7px"><span style="font-family:var(--mono);font-size:10px;color:'+typeColors[s.type]+';letter-spacing:.5px;text-transform:uppercase;font-weight:700;background:'+typeColors[s.type]+'15;padding:2px 7px;border-radius:8px">'+s.type+'</span></div>'
+      +'<div><div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap"><span style="font-family:var(--mono);font-size:10px;color:'+typeColors[s.type]+';letter-spacing:.5px;text-transform:uppercase;font-weight:700;background:'+typeColors[s.type]+'15;padding:2px 7px;border-radius:8px">'+s.type+'</span>'+burnBadge+'</div>'
       +'<div class="sname" style="margin-top:5px">'+esc(s.name)+'</div>'
-      +'<div class="ssub">'+esc(s.duration)+(s.duration&&!isNaN(s.duration)?' min':'')+'</div></div>'
+      +'<div class="ssub">'+esc(s.duration)+(s.duration&&!isNaN(s.duration)?' min':'')+(s.burnNote?'<span style="color:var(--text3);font-style:italic"> · '+esc(s.burnNote)+'</span>':'')+'</div></div>'
       +'<div style="display:flex;gap:6px;align-items:center">'
       +'<button class="showed-btn '+(s.showed?'on':'off')+'" data-sid="'+s.id+'">'+(s.showed?'✓ showed up':'mark showed up')+'</button>'
       +'<button class="btn btn-red" data-del-session="'+s.id+'">✕</button>'
@@ -1283,7 +1311,34 @@ function tplFitness(){
     +'<button class="btn btn-primary" id="h-save-btn" style="margin-top:10px">Save Health Data</button>'
     +'</div>';
 
+  // Total burned from AI-estimated sessions
+  var sessionBurned=daySessions.reduce(function(sum,s){return sum+(s.caloriesBurned||0);},0);
+  // Merge with manual health entry — take whichever is higher, or sum if both exist
+  var totalBurned=Math.max(burned,sessionBurned);
+  // If both exist use sum (manual may include non-session burn like walking)
+  if(burned>0&&sessionBurned>0) totalBurned=burned+sessionBurned;
+
   return'<div style="display:flex;flex-direction:column;gap:14px;max-width:660px">'
+    // ── Calorie Burn Summary ──
+    +(totalBurned>0||daySessions.length>0?'<div class="card card-hero">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between">'
+      +'<div style="display:flex;align-items:center;gap:12px">'
+      +'<div class="cicon" style="background:linear-gradient(135deg,rgba(214,62,90,.12),rgba(232,98,42,.08))">'
+      +'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>'
+      +'</div>'
+      +'<div><div class="ctitle">'+dateLabel+' — Calories Burned</div>'
+      +'<div class="csub">'+(sessionBurned>0?'🤖 AI estimated from '+daySessions.filter(function(s){return s.caloriesBurned;}).length+' session(s)':'Log a session to get an AI estimate')+'</div>'
+      +'</div></div>'
+      +'<div style="text-align:right">'
+      +'<div style="font-family:var(--display);font-size:28px;font-weight:800;color:var(--red);line-height:1">'+(totalBurned||'—')+'</div>'
+      +(totalBurned?'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px">kcal burned</div>':'')
+      +'</div></div>'
+      +(sessionBurned>0&&burned>0?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:16px;font-family:var(--mono);font-size:10px;color:var(--text3)">'
+        +'<span>Sessions: <strong style="color:var(--red)">'+sessionBurned+' kcal</strong></span>'
+        +'<span>Manual: <strong style="color:var(--text2)">'+burned+' kcal</strong></span>'
+        +'<span>Total: <strong style="color:var(--accent)">'+totalBurned+' kcal</strong></span>'
+        +'</div>':'')
+      +'</div>':'')
     +'<div class="grid2">'
     +stravaCard
     +appleCard
@@ -1297,6 +1352,48 @@ function tplFitness(){
     +'<div><div class="ctitle">Sessions</div><div class="csub">'+dateLabel+' · '+daySessions.length+' session'+(daySessions.length!==1?'s':'')+'</div></div></div>'
     +'<button class="btn btn-sm" style="background:rgba(232,98,42,.08);color:var(--accent);border:1px solid rgba(232,98,42,.2)" id="toggle-add">+ session</button>'
     +'</div>'+formHTML+sCards+'</div></div>';
+}
+
+// ── AI Calorie Estimator ──
+function doEstimateCalories(sessionId, dk){
+  var sess=S.sessionsByDate[dk]&&S.sessionsByDate[dk].find(function(s){return s.id===sessionId;});
+  if(!sess) return;
+  var fg=S.fitnessGoal||{};
+  fetch('/api/estimate-calories',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      type:sess.type,
+      name:sess.name,
+      duration:sess.duration,
+      notes:sess.notes,
+      weight:fg.currentWeight||null,
+      age:fg.age||null,
+      sex:fg.sex||null
+    })
+  })
+  .then(function(r){return r.json();})
+  .then(function(data){
+    if(data.error) throw new Error(data.error);
+    if(!S.sessionsByDate[dk]) return;
+    S.sessionsByDate[dk]=S.sessionsByDate[dk].map(function(s){
+      return s.id===sessionId?Object.assign({},s,{caloriesBurned:data.calories,burnNote:data.note,intensity:data.intensity,estimating:false}):s;
+    });
+    // Sync total session burn to healthByDate so nutrition tab picks it up
+    var sessionBurned=S.sessionsByDate[dk].reduce(function(sum,s){return sum+(s.caloriesBurned||0);},0);
+    if(!S.healthByDate) S.healthByDate={};
+    var existing=S.healthByDate[dk]||{};
+    S.healthByDate[dk]=Object.assign({},existing,{sessionBurned:sessionBurned});
+    saveState();
+    if(curTab==='fitness') renderTab();
+    showToast('🔥 ~'+data.calories+' kcal estimated');
+  })
+  .catch(function(){
+    if(!S.sessionsByDate[dk]) return;
+    S.sessionsByDate[dk]=S.sessionsByDate[dk].map(function(s){return s.id===sessionId?Object.assign({},s,{estimating:false}):s;});
+    saveState();if(curTab==='fitness') renderTab();
+    showToast('could not estimate calories');
+  });
 }
 
 // ── EVENT HANDLERS ──
@@ -1485,9 +1582,25 @@ function bindContent(){
     if(!n||!n.value.trim())return showToast('enter a session name');
     var dk=dateKey(selDate);
     if(!S.sessionsByDate) S.sessionsByDate={};if(!S.sessionsByDate[dk]) S.sessionsByDate[dk]=[];
-    S.sessionsByDate[dk].unshift({id:Date.now(),type:S.sessionType,name:n.value.trim(),duration:d?d.value.trim():'',notes:nt?nt.value.trim():'',showed:true,date:dk});
+    var newSession={id:Date.now(),type:S.sessionType,name:n.value.trim(),duration:d?d.value.trim():'',notes:nt?nt.value.trim():'',showed:true,date:dk,estimating:true};
+    S.sessionsByDate[dk].unshift(newSession);
     if(sameDay(selDate,today)){S.streak++;document.getElementById('tb-streak').textContent=S.streak;}
     S.showAddSession=false;saveState();showToast('session logged 💪');renderTab();
+    // Auto-estimate calories
+    doEstimateCalories(newSession.id,dk);
+  });
+
+  // Estimate burn button on existing session cards
+  document.querySelectorAll('[data-est-session]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var id=parseInt(btn.getAttribute('data-est-session'));
+      var dk=dateKey(selDate);
+      var sess=S.sessionsByDate[dk]&&S.sessionsByDate[dk].find(function(s){return s.id===id;});
+      if(!sess) return;
+      S.sessionsByDate[dk]=S.sessionsByDate[dk].map(function(s){return s.id===id?Object.assign({},s,{estimating:true}):s;});
+      saveState();renderTab();
+      doEstimateCalories(id,dk);
+    });
   });
 
   // Apple Health save
