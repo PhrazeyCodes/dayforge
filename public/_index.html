@@ -261,14 +261,12 @@ textarea::placeholder,input::placeholder{color:var(--text3)}
 .hcal-body{height:600px;overflow-y:auto;position:relative;}
 .hcal-body::-webkit-scrollbar{width:4px}
 .hcal-grid{position:relative;padding:0}
-.hour-row{display:grid;grid-template-columns:52px 1fr;border-bottom:1px solid rgba(232,221,208,.45);min-height:54px;position:relative;}
+.hour-row{display:grid;grid-template-columns:52px 1fr;border-bottom:1px solid rgba(232,221,208,.45);height:60px;position:relative;}
 .hour-row:hover .hour-content{background:rgba(232,98,42,.02)}
-.hour-label{padding:10px 12px 0;font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.3px;text-align:right;flex-shrink:0;line-height:1;user-select:none}
-.hour-content{padding:4px 8px;min-height:54px;cursor:pointer;position:relative;transition:background .1s}
-.hour-now-line{position:absolute;left:52px;right:0;height:2px;background:var(--accent);z-index:5;pointer-events:none;}
-.hour-now-line::before{content:'';position:absolute;left:-4px;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px rgba(232,98,42,.5)}
-.cal-event{border-radius:7px;padding:5px 9px;font-size:11px;margin-bottom:3px;cursor:pointer;transition:all .15s;position:relative;overflow:hidden;border-left:3px solid transparent;}
-.cal-event:hover{transform:translateX(2px);filter:brightness(1.05)}
+.hour-label{padding:10px 12px 0;font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.3px;text-align:right;flex-shrink:0;line-height:1;user-select:none;pointer-events:none}
+.hour-content{height:60px;cursor:pointer;position:relative;transition:background .1s}
+.cal-event{border-radius:7px;padding:5px 9px;font-size:11px;cursor:pointer;transition:filter .15s;position:absolute;left:4px;right:4px;overflow:hidden;border-left:3px solid transparent;z-index:2;box-sizing:border-box;}
+.cal-event:hover{filter:brightness(1.05);z-index:3;}
 .cal-event-title{font-weight:600;color:var(--text);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-event-time{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.3px;margin-top:1px}
 .cal-event.gcal{background:rgba(42,106,240,.08);border-left-color:var(--blue)}
@@ -496,6 +494,7 @@ var DEFAULT_S={
   sessionType:'Lifting',
   healthByDate:{},
   calEvents:{},        // keyed by 'YYYY-MM-DD': [{id,title,startHour,startMin,endHour,endMin,type}]
+  recurEvents:[],      // [{id,title,startHour,startMin,endHour,endMin,type,recurStart,recurEnd}]
   strava:null,
   fitnessGoal:{mode:'maintain',targetCalories:2000,targetWeight:null,currentWeight:null,weeklyChange:0,sex:'',age:null,heightFt:null,heightIn:null,activityLevel:'moderate',aiPlan:null},
   weightByDate:{},     // keyed by 'YYYY-MM-DD': {weight, unit:'lbs'}
@@ -889,44 +888,52 @@ function tplGoals(){
 
 function tplHourlyCal(){
   var dk=dateKey(selDate);
-  var events=eventsForDate(selDate);
+  var events=eventsForDate(selDate).slice();
+  // Inject recurring events that cover this date
+  (S.recurEvents||[]).forEach(function(rev){
+    if(!rev.recurStart||!rev.recurEnd) return;
+    var cur=dk;
+    if(cur>=rev.recurStart&&cur<=rev.recurEnd){
+      events.push(Object.assign({},rev,{isRecur:true,id:rev.id+'_'+dk}));
+    }
+  });
+
   var isToday=sameDay(selDate,today);
   var dateLabel=selDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
-
-  // Group events by hour
-  var byHour={};
-  events.forEach(function(ev){
-    var h=ev.startHour;
-    if(!byHour[h]) byHour[h]=[];
-    byHour[h].push(ev);
-  });
+  var ROW_H=60; // px per hour — matches CSS .hour-row height:60px
+  var LABEL_W=52; // px for the hour label column
 
   var nowH=new Date().getHours();
   var nowM=new Date().getMinutes();
-  var nowPct=((nowH*60+nowM)/(24*60))*100;
+  var nowTopPx=((nowH*60+nowM)*ROW_H/60).toFixed(1);
 
+  // Build hour row skeletons — no events inside, they'll be absolutely layered on top
   var rows='';
   for(var h=0;h<24;h++){
-    var label=h===0?'12am':h<12?h+'am':h===12?'12pm':(h-12)+'pm';
-    var evHtml='';
-    if(byHour[h]){
-      byHour[h].forEach(function(ev){
-        var timeStr=fmtTime(ev.startHour,ev.startMin)+' – '+fmtTime(ev.endHour,ev.endMin);
-        var gcalBadge=ev.gcal?'<span class="cal-event-badge gcal-badge">G CAL</span>':'';
-        evHtml+='<div class="cal-event '+esc(ev.type||'personal')+'" data-evid="'+esc(ev.id)+'">'
-          +'<div class="cal-event-title">'+gcalBadge+esc(ev.title)+'</div>'
-          +'<div class="cal-event-time">'+timeStr+'</div>'
-          +'</div>';
-      });
-    }
+    var lbl=h===0?'12am':h<12?h+'am':h===12?'12pm':(h-12)+'pm';
     rows+='<div class="hour-row" id="hour-'+h+'" data-addhour="'+h+'">'
-      +'<div class="hour-label">'+label+'</div>'
-      +'<div class="hour-content" data-addhour="'+h+'">'+evHtml+'</div>'
+      +'<div class="hour-label">'+lbl+'</div>'
+      +'<div class="hour-content" data-addhour="'+h+'"></div>'
       +'</div>';
   }
 
-
-  // (Google Calendar removed)
+  // Build absolutely-positioned event blocks that span their real pixel height
+  var knownTypes={personal:1,meeting:1,workout:1,other:1,gcal:1};
+  var evBlocks='';
+  events.forEach(function(ev){
+    var startMins=(ev.startHour||0)*60+(ev.startMin||0);
+    var endMins=(ev.endHour||0)*60+(ev.endMin||0);
+    if(endMins<=startMins) endMins=startMins+30; // minimum 30min if misconfigured
+    var topPx=(startMins*ROW_H/60).toFixed(1);
+    var hPx=Math.max((endMins-startMins)*ROW_H/60,22).toFixed(1);
+    var timeStr=fmtTime(ev.startHour,ev.startMin||0)+' \u2013 '+fmtTime(ev.endHour,ev.endMin||0);
+    var cssType=knownTypes[ev.type]?ev.type:'personal';
+    var recurBadge=ev.isRecur?'<span style="opacity:.55;margin-left:3px;font-size:10px">\u21bb</span>':'';
+    evBlocks+='<div class="cal-event '+cssType+'" data-evid="'+esc(ev.id)+'" style="top:'+topPx+'px;height:'+hPx+'px;position:absolute;left:'+(LABEL_W+4)+'px;right:4px;">'
+      +'<div class="cal-event-title">'+esc(ev.title)+recurBadge+'</div>'
+      +(parseFloat(hPx)>30?'<div class="cal-event-time">'+timeStr+'</div>':'')
+      +'</div>';
+  });
 
   return '<div class="hourly-cal">'
     +'<div class="hcal-header">'
@@ -934,9 +941,13 @@ function tplHourlyCal(){
     +'<button class="add-event-btn" id="add-event-btn">+ Add Event</button>'
     +'</div>'
     +'<div class="hcal-body" id="hcal-body">'
-    +'<div class="hcal-grid" id="hcal-grid">'
-    +(isToday?'<div class="hour-now-line" id="hour-now-line" style="top:'+nowPct+'%"></div>':'')
+    +'<div class="hcal-grid" id="hcal-grid" style="position:relative;height:'+(24*ROW_H)+'px">'
+    // now-line
+    +(isToday?'<div style="position:absolute;left:'+LABEL_W+'px;right:0;top:'+nowTopPx+'px;height:2px;background:var(--accent);z-index:5;pointer-events:none">'
+      +'<div style="position:absolute;left:-5px;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px rgba(232,98,42,.5)"></div>'
+      +'</div>':'')
     +rows
+    +evBlocks
     +'</div>'
     +'</div>'
     +'</div>';
@@ -1610,8 +1621,15 @@ function bindContent(){
   document.querySelectorAll('[data-evid]').forEach(function(el){
     el.addEventListener('click',function(e){
       e.stopPropagation();
+      var evid=el.getAttribute('data-evid');
       var evts2=eventsForDate(selDate);
-      var ev=evts2.find(function(ev){return ev.id===el.getAttribute('data-evid');});
+      var ev=evts2.find(function(ev){return ev.id===evid;});
+      if(!ev){
+        // Check if it's a recurring instance (id is rev_xxx_YYYY-MM-DD)
+        var baseId=evid.replace(/_\d{4}-\d{2}-\d{2}$/,'');
+        var rev=(S.recurEvents||[]).find(function(r){return r.id===baseId;});
+        if(rev) ev=Object.assign({},rev,{isRecur:true,isRecurringDef:true});
+      }
       if(ev) openEventModal(ev.startHour,ev);
     });
   });
@@ -1624,45 +1642,73 @@ function openEventModal(defaultHour, existingEvent){
   var h=defaultHour!=null?defaultHour:9;
   var endH=existingEvent?existingEvent.endHour:Math.min(23,h+1);
   var isEdit=!!existingEvent;
-  var ev=existingEvent||{title:'',startHour:h,startMin:0,endHour:endH,endMin:0,type:'personal',gcal:false};
+  var isRecurring=existingEvent&&existingEvent.isRecurringDef;
+  var ev=existingEvent||{title:'',startHour:h,startMin:0,endHour:endH,endMin:0,type:'',gcal:false,recurStart:'',recurEnd:''};
 
-  var typeOpts=['personal','meeting','workout','other'].map(function(t){
-    var label=t.charAt(0).toUpperCase()+t.slice(1);
-    var on=ev.type===t;
-    return'<button class="type-btn '+(on?'on':'off')+'" data-evtype="'+t+'">'+label+'</button>';
+  // Quick-type suggestion chips
+  var suggestions=['Personal','Work','Meeting','Workout','School','Other'];
+  var chipHTML=suggestions.map(function(t){
+    return'<button type="button" class="type-btn off" data-chip="'+t+'" style="font-size:10px;padding:3px 10px">'+t+'</button>';
   }).join('');
 
   modal.innerHTML='<div class="modal-title">'+(isEdit?'Edit Event':'Add Event')+'</div>'
     +'<div class="modal-sub">'+selDate.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})+'</div>'
     +'<label class="flabel" style="margin-top:0">event title</label>'
     +'<input type="text" id="ev-title" placeholder="e.g. Team standup, Morning run" value="'+esc(ev.title)+'"/>'
-    +'<label class="flabel">type</label>'
-    +'<div class="type-btns" id="ev-type-btns">'+typeOpts+'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+
+    // Free-text type
+    +'<label class="flabel">type <span style="color:var(--text3);font-weight:400">(type your own or pick one)</span></label>'
+    +'<input type="text" id="ev-type-input" placeholder="e.g. Work, Gym, School..." value="'+esc(ev.type||'')+'" style="margin-bottom:6px"/>'
+    +'<div class="type-btns" id="ev-type-chips" style="flex-wrap:wrap;gap:5px">'+chipHTML+'</div>'
+
+    // Times
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">'
     +'<div><label class="flabel">start time</label>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
     +'<input type="number" id="ev-sh" min="0" max="23" value="'+ev.startHour+'" placeholder="Hr"/>'
-    +'<input type="number" id="ev-sm" min="0" max="59" value="'+ev.startMin+'" placeholder="Min"/>'
+    +'<input type="number" id="ev-sm" min="0" max="59" value="'+(ev.startMin||0)+'" placeholder="Min"/>'
     +'</div></div>'
     +'<div><label class="flabel">end time</label>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
     +'<input type="number" id="ev-eh" min="0" max="23" value="'+ev.endHour+'" placeholder="Hr"/>'
-    +'<input type="number" id="ev-em" min="0" max="59" value="'+ev.endMin+'" placeholder="Min"/>'
+    +'<input type="number" id="ev-em" min="0" max="59" value="'+(ev.endMin||0)+'" placeholder="Min"/>'
     +'</div></div>'
     +'</div>'
+
+    // Recurring toggle
+    +'<div style="display:flex;align-items:center;gap:8px;margin-top:12px;margin-bottom:4px">'
+    +'<input type="checkbox" id="ev-recur-chk" style="width:16px;height:16px;accent-color:var(--accent)"'+(ev.recurStart?' checked':'')+'>'
+    +'<label for="ev-recur-chk" style="font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;letter-spacing:.2px">Repeat across a date range</label>'
+    +'</div>'
+    +'<div id="ev-recur-fields" style="display:'+(ev.recurStart?'grid':'none')+';grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">'
+    +'<div><label class="flabel" style="margin-top:0">start date</label>'
+    +'<input type="date" id="ev-rstart" value="'+(ev.recurStart||dateKey(selDate))+'"/></div>'
+    +'<div><label class="flabel" style="margin-top:0">end date</label>'
+    +'<input type="date" id="ev-rend" value="'+(ev.recurEnd||'')+'" placeholder="End date"/></div>'
+    +'</div>'
+
     +'<button class="mbtn prim" id="ev-save">'+(isEdit?'Update Event':'Add to Calendar')+'</button>'
     +(isEdit?'<button class="mbtn sec" id="ev-delete">Delete Event</button>':'')
     +'<button class="mcancel" id="ev-cancel">cancel</button>';
 
   document.getElementById('event-overlay').style.display='flex';
 
-  // type toggle
-  var currentType=ev.type;
-  modal.querySelectorAll('[data-evtype]').forEach(function(btn){
+  // Chip clicks fill the type input
+  modal.querySelectorAll('[data-chip]').forEach(function(btn){
     btn.addEventListener('click',function(){
-      currentType=btn.getAttribute('data-evtype');
-      modal.querySelectorAll('[data-evtype]').forEach(function(b){b.className='type-btn '+(b.getAttribute('data-evtype')===currentType?'on':'off');});
+      var t=btn.getAttribute('data-chip');
+      document.getElementById('ev-type-input').value=t;
+      modal.querySelectorAll('[data-chip]').forEach(function(b){b.className='type-btn '+(b.getAttribute('data-chip')===t?'on':'off');});
     });
+  });
+  // Typing in the input clears chip selection
+  document.getElementById('ev-type-input').addEventListener('input',function(){
+    modal.querySelectorAll('[data-chip]').forEach(function(b){b.className='type-btn off';});
+  });
+
+  // Recur toggle shows/hides fields
+  document.getElementById('ev-recur-chk').addEventListener('change',function(){
+    document.getElementById('ev-recur-fields').style.display=this.checked?'grid':'none';
   });
 
   document.getElementById('ev-save').addEventListener('click',function(){
@@ -1670,28 +1716,57 @@ function openEventModal(defaultHour, existingEvent){
     if(!title) return showToast('enter an event title');
     var sh=parseInt(document.getElementById('ev-sh').value)||0;
     var sm=parseInt(document.getElementById('ev-sm').value)||0;
-    var eh=parseInt(document.getElementById('ev-eh').value)||Math.min(23,sh+1);
+    var eh=parseInt(document.getElementById('ev-eh').value);
+    if(isNaN(eh)) eh=Math.min(23,sh+1);
     var em=parseInt(document.getElementById('ev-em').value)||0;
-    var dk=dateKey(selDate);
-    if(!S.calEvents) S.calEvents={};
-    if(!S.calEvents[dk]) S.calEvents[dk]=[];
-    if(isEdit){
-      S.calEvents[dk]=S.calEvents[dk].map(function(e){
-        return e.id===ev.id?Object.assign({},e,{title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:currentType}):e;
-      });
+    var typeVal=(document.getElementById('ev-type-input').value.trim()||'personal').toLowerCase();
+    var isRecur=document.getElementById('ev-recur-chk').checked;
+    var rStart=isRecur?(document.getElementById('ev-rstart').value||dateKey(selDate)):'';
+    var rEnd=isRecur?(document.getElementById('ev-rend').value||''):'';
+    if(isRecur&&!rEnd) return showToast('set an end date for recurring event');
+
+    if(isRecur){
+      // Save as a recurring event definition
+      if(!S.recurEvents) S.recurEvents=[];
+      if(isEdit&&ev.isRecurringDef){
+        S.recurEvents=S.recurEvents.map(function(r){
+          return r.id===ev.id?Object.assign({},r,{title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal,recurStart:rStart,recurEnd:rEnd}):r;
+        });
+      } else {
+        S.recurEvents.push({id:'rev_'+Date.now(),title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal,recurStart:rStart,recurEnd:rEnd,isRecurringDef:true});
+      }
     } else {
-      S.calEvents[dk].push({id:'ev_'+Date.now(),title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:currentType,gcal:false});
+      var dk=dateKey(selDate);
+      if(!S.calEvents) S.calEvents={};
+      if(!S.calEvents[dk]) S.calEvents[dk]=[];
+      if(isEdit&&!ev.isRecur){
+        S.calEvents[dk]=S.calEvents[dk].map(function(e){
+          return e.id===ev.id?Object.assign({},e,{title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal}):e;
+        });
+      } else {
+        S.calEvents[dk].push({id:'ev_'+Date.now(),title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal,gcal:false});
+      }
     }
-    saveState();document.getElementById('event-overlay').style.display='none';
-    showToast(isEdit?'event updated':'event added');renderTab();
+
+    saveState();
+    document.getElementById('event-overlay').style.display='none';
+    showToast(isEdit?'event updated':'event added');
+    renderTab();
     if(activeTab==='goals') scrollHourlyToNow();
   });
 
   if(isEdit){
     document.getElementById('ev-delete').addEventListener('click',function(){
       var dk=dateKey(selDate);
-      if(S.calEvents[dk]) S.calEvents[dk]=S.calEvents[dk].filter(function(e){return e.id!==ev.id;});
-      saveState();document.getElementById('event-overlay').style.display='none';
+      if(ev.isRecurringDef||ev.isRecur){
+        // Delete the recurring definition
+        var rid=ev.id.replace(/_\d{4}-\d{2}-\d{2}$/,''); // strip _dk suffix from instance id
+        S.recurEvents=(S.recurEvents||[]).filter(function(r){return r.id!==rid&&r.id!==ev.id;});
+      } else {
+        if(S.calEvents[dk]) S.calEvents[dk]=S.calEvents[dk].filter(function(e){return e.id!==ev.id;});
+      }
+      saveState();
+      document.getElementById('event-overlay').style.display='none';
       showToast('event deleted');renderTab();
     });
   }
