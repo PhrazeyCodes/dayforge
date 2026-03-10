@@ -933,7 +933,10 @@ function scrollHourlyToNow(){
 
 function tplNutrition(){
   var fg=S.fitnessGoal||{mode:'maintain',targetCalories:2000,targetWeight:null,currentWeight:null};
-  var calGoal=(fg.aiPlan&&fg.aiPlan.calories)||fg.targetCalories||S.macGoals.calories||2000;
+  var plan=fg.aiPlan||null;
+  var hasPlan=!!(plan&&plan.calories);
+  var showManual=S.nutritionManualMode||false;
+  var calGoal=(hasPlan?plan.calories:fg.targetCalories)||S.macGoals.calories||2000;
   var t=macTotalsForDate(selDate),calPct=pct(t.cal,calGoal);
   var meals=mealsForDate(selDate);
   var isToday=sameDay(selDate,today);
@@ -953,88 +956,16 @@ function tplNutrition(){
     return'<div style="margin-bottom:14px"><div class="section-cat">'+cat+'</div>'+rows+'</div>';
   }).join('');
 
-  // ── Meal log by category
-  var cats=['Breakfast','Lunch','Dinner','Snack'];
-  var mealsByCategory=cats.map(function(cat){
-    var items=meals.filter(function(m){return m.meal===cat;});
-    if(!items.length) return '';
-    var rows=items.map(function(m){
-      return'<div class="meal-row"><div><div class="meal-name">'+esc(m.name)+'</div><div class="meal-sub">'+m.cal+' kcal · '+m.p+'P · '+m.c+'C · '+m.f+'F</div></div>'
-        +'<button class="btn btn-red" data-del-meal="'+m.id+'">✕</button></div>';
-    }).join('');
-    return'<div style="margin-bottom:14px"><div class="section-cat">'+cat+'</div>'+rows+'</div>';
-  }).join('');
-
-  // ── Weight chart (8 weeks of data)
-  var weightPoints=[];
-  var expectedPoints=[];
-  var chartLabels=[];
-  var startWeight=fg.currentWeight||null;
-  var weeklyDelta=fg.mode==='deficit'?-0.75:fg.mode==='surplus'?0.5:0;
-  for(var wi=7;wi>=0;wi--){
-    var wd=new Date(today);wd.setDate(today.getDate()-wi*7);
-    var dk2=dateKey(wd);
-    var wEntry=S.weightByDate&&S.weightByDate[dk2];
-    weightPoints.push(wEntry?wEntry.weight:null);
-    if(startWeight!=null) expectedPoints.push(+(startWeight+(weeklyDelta*(7-wi))).toFixed(1));
-    else expectedPoints.push(null);
-    chartLabels.push(wd.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
-  }
-  var allWeights=weightPoints.filter(function(v){return v!=null;});
-  var allExpected=expectedPoints.filter(function(v){return v!=null;});
-  var allVals=allWeights.concat(allExpected);
-  var minW=allVals.length?Math.min.apply(null,allVals)-2:50;
-  var maxW=allVals.length?Math.max.apply(null,allVals)+2:200;
-  var chartH=110,chartW=560,padL=38,padR=12,padT=12,padB=28;
-  var plotW=chartW-padL-padR,plotH=chartH-padT-padB;
-  function toX(i){return padL+i*(plotW/(weightPoints.length-1));}
-  function toY(v){return padT+plotH*(1-(v-minW)/(maxW-minW||1));}
-
-  // Build SVG weight chart
-  var weightSVG='<svg viewBox="0 0 '+chartW+' '+chartH+'" style="width:100%;height:auto;overflow:visible">';
-  // Grid lines
-  for(var gi=0;gi<=4;gi++){
-    var gy=padT+gi*(plotH/4);
-    var gv=(maxW-(gi/4)*(maxW-minW)).toFixed(0);
-    weightSVG+='<line x1="'+padL+'" y1="'+gy+'" x2="'+(chartW-padR)+'" y2="'+gy+'" stroke="var(--border)" stroke-width="1"/>';
-    weightSVG+='<text x="'+(padL-4)+'" y="'+(gy+4)+'" text-anchor="end" font-size="9" fill="var(--text3)" font-family="DM Mono,monospace">'+gv+'</text>';
-  }
-  // Expected line (dashed)
-  var expPath='';
-  expectedPoints.forEach(function(v,i){if(v==null)return;expPath+=(expPath===''?'M':'L')+toX(i).toFixed(1)+','+toY(v).toFixed(1);});
-  if(expPath) weightSVG+='<path d="'+expPath+'" fill="none" stroke="var(--green2)" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.7"/>';
-  // Actual line
-  var actPath='',actDots='';
-  weightPoints.forEach(function(v,i){
-    if(v==null)return;
-    actPath+=(actPath===''?'M':'L')+toX(i).toFixed(1)+','+toY(v).toFixed(1);
-    actDots+='<circle cx="'+toX(i).toFixed(1)+'" cy="'+toY(v).toFixed(1)+'" r="4" fill="var(--accent)" stroke="white" stroke-width="1.5"/>';
-  });
-  if(actPath) weightSVG+='<path d="'+actPath+'" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
-  weightSVG+=actDots;
-  // X axis labels (every 2 weeks)
-  weightPoints.forEach(function(v,i){
-    if(i%2===0) weightSVG+='<text x="'+toX(i).toFixed(1)+'" y="'+(chartH-4)+'" text-anchor="middle" font-size="9" fill="var(--text3)" font-family="DM Mono,monospace">'+chartLabels[i]+'</text>';
-  });
-  weightSVG+='</svg>';
-
-  // ── Today's weight entry
-  var todayWeight=weightForDate(selDate);
-  var weightInputVal=todayWeight?todayWeight.weight:'';
-
-  // ── AI Plan display
-  var plan=fg.aiPlan||null;
-  var hasPlan=!!(plan&&plan.calories);
-
   // ── Weight chart (8 weeks)
-  var weightPoints=[],expectedPoints=[],chartLabels=[];
   var startWeight=fg.currentWeight||null;
   var weeklyDelta=plan?plan.weeklyChange:(fg.mode==='deficit'?-0.75:fg.mode==='surplus'?0.5:0);
+  var weightPoints=[],expectedPoints=[],chartDateKeys=[],chartLabels=[];
   for(var wi=7;wi>=0;wi--){
     var wd=new Date(today);wd.setDate(today.getDate()-wi*7);
     var dk2=dateKey(wd);
     var wEntry=S.weightByDate&&S.weightByDate[dk2];
     weightPoints.push(wEntry?wEntry.weight:null);
+    chartDateKeys.push(dk2);
     if(startWeight!=null) expectedPoints.push(+(startWeight+(weeklyDelta*(7-wi))).toFixed(1));
     else expectedPoints.push(null);
     chartLabels.push(wd.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
@@ -1044,21 +975,23 @@ function tplNutrition(){
   var allVals=allWeights.concat(allExpected);
   var minW=allVals.length?Math.min.apply(null,allVals)-3:50;
   var maxW=allVals.length?Math.max.apply(null,allVals)+3:200;
-  var chartH=130,chartW=580,padL=42,padR=14,padT=14,padB=30;
+  var chartH=130,chartW=580,padL=42,padR=20,padT=14,padB=30;
   var plotW=chartW-padL-padR,plotH=chartH-padT-padB;
   function toX(i){return padL+i*(plotW/(weightPoints.length-1));}
   function toY(v){return padT+plotH*(1-(v-minW)/(maxW-minW||1));}
   var weightSVG='<svg viewBox="0 0 '+chartW+' '+chartH+'" style="width:100%;height:auto;overflow:visible">';
   for(var gi=0;gi<=4;gi++){var gy=padT+gi*(plotH/4);var gv=(maxW-(gi/4)*(maxW-minW)).toFixed(0);weightSVG+='<line x1="'+padL+'" y1="'+gy.toFixed(1)+'" x2="'+(chartW-padR)+'" y2="'+gy.toFixed(1)+'" stroke="var(--border)" stroke-width="1"/><text x="'+(padL-5)+'" y="'+(gy+4).toFixed(1)+'" text-anchor="end" font-size="9" fill="var(--text3)" font-family="DM Mono,monospace">'+gv+'</text>';}
-  // target weight line
-  if(fg.targetWeight&&fg.targetWeight>minW&&fg.targetWeight<maxW){var ty=toY(fg.targetWeight);weightSVG+='<line x1="'+padL+'" y1="'+ty.toFixed(1)+'" x2="'+(chartW-padR)+'" y2="'+ty.toFixed(1)+'" stroke="var(--purple)" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/><text x="'+(chartW-padR+3)+'" y="'+(ty+4).toFixed(1)+'" font-size="9" fill="var(--purple)" font-family="DM Mono,monospace">goal</text>';}
-  // start weight line
-  if(startWeight&&startWeight>minW&&startWeight<maxW){var swy=toY(startWeight);weightSVG+='<line x1="'+padL+'" y1="'+swy.toFixed(1)+'" x2="'+(chartW-padR)+'" y2="'+swy.toFixed(1)+'" stroke="var(--text3)" stroke-width="1" stroke-dasharray="2,4" opacity="0.4"/>';}
+  if(fg.targetWeight&&fg.targetWeight>minW&&fg.targetWeight<maxW){var ty=toY(fg.targetWeight);weightSVG+='<line x1="'+padL+'" y1="'+ty.toFixed(1)+'" x2="'+(chartW-padR)+'" y2="'+ty.toFixed(1)+'" stroke="var(--purple)" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/><text x="'+(chartW-padR+3)+'" y="'+(ty+4).toFixed(1)+'" font-size="8" fill="var(--purple)" font-family="DM Mono,monospace">goal</text>';}
+  if(startWeight&&startWeight>minW&&startWeight<maxW){var swy=toY(startWeight);weightSVG+='<line x1="'+padL+'" y1="'+swy.toFixed(1)+'" x2="'+(chartW-padR)+'" y2="'+swy.toFixed(1)+'" stroke="var(--text3)" stroke-width="1" stroke-dasharray="2,4" opacity="0.35"/>';}
   var expPath='';
   expectedPoints.forEach(function(v,i){if(v==null)return;expPath+=(expPath===''?'M':'L')+toX(i).toFixed(1)+','+toY(v).toFixed(1);});
   if(expPath) weightSVG+='<path d="'+expPath+'" fill="none" stroke="var(--green2)" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.8"/>';
   var actPath='',actDots='';
-  weightPoints.forEach(function(v,i){if(v==null)return;actPath+=(actPath===''?'M':'L')+toX(i).toFixed(1)+','+toY(v).toFixed(1);actDots+='<circle cx="'+toX(i).toFixed(1)+'" cy="'+toY(v).toFixed(1)+'" r="4" fill="var(--accent)" stroke="white" stroke-width="1.5"/>';});
+  weightPoints.forEach(function(v,i){
+    if(v==null)return;
+    actPath+=(actPath===''?'M':'L')+toX(i).toFixed(1)+','+toY(v).toFixed(1);
+    actDots+='<circle cx="'+toX(i).toFixed(1)+'" cy="'+toY(v).toFixed(1)+'" r="5" fill="var(--accent)" stroke="white" stroke-width="2" style="cursor:pointer" data-del-weight="'+chartDateKeys[i]+'" title="'+v+' lbs — click to delete"/>';
+  });
   if(actPath) weightSVG+='<path d="'+actPath+'" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
   weightSVG+=actDots;
   weightPoints.forEach(function(v,i){if(i%2===0)weightSVG+='<text x="'+toX(i).toFixed(1)+'" y="'+(chartH-4)+'" text-anchor="middle" font-size="9" fill="var(--text3)" font-family="DM Mono,monospace">'+chartLabels[i]+'</text>';});
@@ -1066,81 +999,115 @@ function tplNutrition(){
 
   var todayWeight=weightForDate(selDate);
   var weightInputVal=todayWeight?todayWeight.weight:'';
-
-  // ── Estimate weeks to goal
   var weeksToGoal='';
   if(startWeight&&fg.targetWeight&&weeklyDelta!==0){
     var diff=fg.targetWeight-startWeight;
-    if((diff<0&&weeklyDelta<0)||(diff>0&&weeklyDelta>0)){
-      var wks=Math.abs(diff/weeklyDelta);
-      weeksToGoal='~'+Math.round(wks)+' weeks to reach '+fg.targetWeight+' lbs';
-    }
+    if((diff<0&&weeklyDelta<0)||(diff>0&&weeklyDelta>0)){weeksToGoal='~'+Math.round(Math.abs(diff/weeklyDelta))+' weeks to goal';}
   }
+
+  // ── Weight log list (deletable entries)
+  var sortedWeightEntries=Object.keys(S.weightByDate||{}).sort().reverse().slice(0,10);
+  var weightLogRows=sortedWeightEntries.map(function(dk3){
+    var e=S.weightByDate[dk3];
+    var d=new Date(dk3+'T00:00:00');
+    var lbl=d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    return'<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'
+      +'<div><span style="font-size:12px;font-weight:600;color:var(--text)">'+e.weight+' lbs</span>'
+      +'<span style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-left:8px">'+lbl+'</span></div>'
+      +'<button class="btn btn-red" data-del-weight="'+dk3+'">✕</button></div>';
+  }).join('');
 
   return'<div style="display:flex;flex-direction:column;gap:14px;max-width:680px">'
 
-  // ── AI Coach Card ──
+  // ── Nutrition Coach Card ──
   +'<div class="card" style="background:linear-gradient(135deg,#0f1923,#1a2535);border-color:rgba(42,106,240,.25)">'
-  +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">'
+  +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+  +'<div style="display:flex;align-items:center;gap:12px">'
   +'<div style="width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#2a6af0,#7657d6);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;box-shadow:0 4px 16px rgba(42,106,240,.4)">🤖</div>'
-  +'<div><div style="font-family:var(--display);font-size:16px;font-weight:700;color:#fff;letter-spacing:-.2px">AI Nutrition Coach</div>'
-  +'<div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:2px">Personalized calorie & macro targets based on your body</div>'
+  +'<div><div style="font-family:var(--display);font-size:16px;font-weight:700;color:#fff;letter-spacing:-.2px">Nutrition Plan</div>'
+  +'<div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:2px">'+(hasPlan?'AI-generated plan active':'Set your calorie & macro targets')+'</div>'
   +'</div></div>'
-
-  // Goal mode selector
-  +'<div style="display:flex;gap:6px;margin-bottom:14px">'
-  +['deficit','maintain','surplus'].map(function(m){
-    var icons={deficit:'🔥',maintain:'⚖️',surplus:'💪'};
-    var labels={deficit:'Cut',maintain:'Maintain',surplus:'Bulk'};
-    var active=fg.mode===m;
-    return'<button class="ngoal-mode-btn" data-mode="'+m+'" style="flex:1;padding:9px 6px;border-radius:10px;border:1.5px solid '+(active?'rgba(42,106,240,.6)':'rgba(255,255,255,.08)')+';background:'+(active?'rgba(42,106,240,.18)':'rgba(255,255,255,.04)')+';color:'+(active?'#7aadff':'rgba(255,255,255,.45)')+';font-family:var(--mono);font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:3px">'
-      +'<span style="font-size:16px">'+icons[m]+'</span>'+labels[m]+'</button>';
-  }).join('')
-  +'</div>'
-
-  // Personal stats inputs
-  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
-  +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">sex</label>'
-  +'<select id="ng-sex" style="width:100%;border:1.5px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px;font-family:var(--sans);font-size:13px;color:#fff;background:#1e2d40;outline:none">'
-  +'<option value="" '+(fg.sex===''?'selected':'')+'>Select...</option>'
-  +'<option value="male" '+(fg.sex==='male'?'selected':'')+'>Male</option>'
-  +'<option value="female" '+(fg.sex==='female'?'selected':'')+'>Female</option>'
-  +'</select></div>'
-  +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">age</label>'
-  +'<input type="number" id="ng-age" placeholder="25" value="'+(fg.age||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
-  +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">height</label>'
+  // Toggle AI vs Manual
   +'<div style="display:flex;gap:6px">'
-  +'<input type="number" id="ng-hft" placeholder="5 ft" value="'+(fg.heightFt||'')+'" style="margin:0;flex:1;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/>'
-  +'<input type="number" id="ng-hin" placeholder="10 in" value="'+(fg.heightIn||'')+'" style="margin:0;flex:1;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/>'
+  +'<button id="plan-tab-ai" style="padding:6px 12px;border-radius:8px;border:1.5px solid '+((!showManual)?'rgba(42,106,240,.6)':'rgba(255,255,255,.1)')+';background:'+((!showManual)?'rgba(42,106,240,.2)':'transparent')+';color:'+((!showManual)?'#7aadff':'rgba(255,255,255,.4)')+';font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer">🤖 AI Coach</button>'
+  +'<button id="plan-tab-manual" style="padding:6px 12px;border-radius:8px;border:1.5px solid '+((showManual)?'rgba(29,158,111,.6)':'rgba(255,255,255,.1)')+';background:'+((showManual)?'rgba(29,158,111,.18)':'transparent')+';color:'+((showManual)?'var(--green2)':'rgba(255,255,255,.4)')+';font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer">✏️ Manual</button>'
   +'</div></div>'
-  +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">current weight (lbs)</label>'
-  +'<input type="number" id="ng-curweight" placeholder="175" value="'+(fg.currentWeight||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
-  +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">target weight (lbs)</label>'
-  +'<input type="number" id="ng-tgtweight" placeholder="165" value="'+(fg.targetWeight||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
-  +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">activity level</label>'
-  +'<select id="ng-activity" style="width:100%;border:1.5px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px;font-family:var(--sans);font-size:13px;color:#fff;background:#1e2d40;outline:none">'
-  +'<option value="sedentary" '+(fg.activityLevel==='sedentary'?'selected':'')+'>Sedentary (desk job)</option>'
-  +'<option value="light" '+(fg.activityLevel==='light'?'selected':'')+'>Light (1–2x/week)</option>'
-  +'<option value="moderate" '+(fg.activityLevel==='moderate'?'selected':'')+'>Moderate (3–4x/week)</option>'
-  +'<option value="active" '+(fg.activityLevel==='active'?'selected':'')+'>Active (5–6x/week)</option>'
-  +'<option value="very_active" '+(fg.activityLevel==='very_active'?'selected':'')+'>Very Active (daily intense)</option>'
-  +'</select></div>'
-  +'</div>'
-  +'<button class="btn btn-primary" id="ai-coach-btn" style="background:linear-gradient(135deg,#2a6af0,#7657d6);box-shadow:0 4px 16px rgba(42,106,240,.35)">🤖 Generate My AI Plan</button>'
 
-  // AI Plan result
-  +(hasPlan?'<div id="ai-plan-result" style="margin-top:14px;background:rgba(42,106,240,.08);border:1px solid rgba(42,106,240,.2);border-radius:12px;padding:14px">'
-    +'<div style="font-family:var(--mono);font-size:10px;font-weight:700;color:#7aadff;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">Your AI Plan</div>'
-    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">'
-    +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--accent)">'+plan.calories+'</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">KCAL</div></div>'
-    +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:#2a6af0">'+plan.protein+'g</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">PROTEIN</div></div>'
-    +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--gold)">'+plan.carbs+'g</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">CARBS</div></div>'
-    +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--red)">'+plan.fat+'g</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">FAT</div></div>'
+  // ── AI tab
+  +(!showManual?(
+    // goal mode
+    '<div style="display:flex;gap:6px;margin-bottom:14px">'
+    +['deficit','maintain','surplus'].map(function(m){
+      var icons={deficit:'🔥',maintain:'⚖️',surplus:'💪'};
+      var labels={deficit:'Cut',maintain:'Maintain',surplus:'Bulk'};
+      var active=fg.mode===m;
+      return'<button class="ngoal-mode-btn" data-mode="'+m+'" style="flex:1;padding:9px 6px;border-radius:10px;border:1.5px solid '+(active?'rgba(42,106,240,.6)':'rgba(255,255,255,.08)')+';background:'+(active?'rgba(42,106,240,.18)':'rgba(255,255,255,.04)')+';color:'+(active?'#7aadff':'rgba(255,255,255,.4)')+';font-family:var(--mono);font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:3px"><span style="font-size:16px">'+icons[m]+'</span>'+labels[m]+'</button>';
+    }).join('')+'</div>'
+    // personal stats
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">sex</label>'
+    +'<select id="ng-sex" style="width:100%;border:1.5px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px;font-family:var(--sans);font-size:13px;color:#fff;background:#1e2d40;outline:none">'
+    +'<option value="">Select...</option><option value="male" '+(fg.sex==='male'?'selected':'')+'>Male</option><option value="female" '+(fg.sex==='female'?'selected':'')+'>Female</option>'
+    +'</select></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">age</label>'
+    +'<input type="number" id="ng-age" placeholder="25" value="'+(fg.age||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">height</label>'
+    +'<div style="display:flex;gap:6px">'
+    +'<input type="number" id="ng-hft" placeholder="ft" value="'+(fg.heightFt||'')+'" style="margin:0;flex:1;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/>'
+    +'<input type="number" id="ng-hin" placeholder="in" value="'+(fg.heightIn||'')+'" style="margin:0;flex:1;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/>'
+    +'</div></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">current weight (lbs)</label>'
+    +'<input type="number" id="ng-curweight" placeholder="175" value="'+(fg.currentWeight||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">target weight (lbs)</label>'
+    +'<input type="number" id="ng-tgtweight" placeholder="165" value="'+(fg.targetWeight||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">activity level</label>'
+    +'<select id="ng-activity" style="width:100%;border:1.5px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px;font-family:var(--sans);font-size:13px;color:#fff;background:#1e2d40;outline:none">'
+    +'<option value="sedentary" '+(fg.activityLevel==='sedentary'?'selected':'')+'>Sedentary (desk job)</option>'
+    +'<option value="light" '+(fg.activityLevel==='light'?'selected':'')+'>Light (1–2x/week)</option>'
+    +'<option value="moderate" '+(fg.activityLevel==='moderate'?'selected':'')+'>Moderate (3–4x/week)</option>'
+    +'<option value="active" '+(fg.activityLevel==='active'?'selected':'')+'>Active (5–6x/week)</option>'
+    +'<option value="very_active" '+(fg.activityLevel==='very_active'?'selected':'')+'>Very Active (daily intense)</option>'
+    +'</select></div></div>'
+    +'<button class="btn btn-primary" id="ai-coach-btn" style="background:linear-gradient(135deg,#2a6af0,#7657d6);box-shadow:0 4px 16px rgba(42,106,240,.35)">🤖 Generate My AI Plan</button>'
+    // plan result
+    +(hasPlan
+      ?'<div style="margin-top:14px;background:rgba(42,106,240,.08);border:1px solid rgba(42,106,240,.2);border-radius:12px;padding:14px">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+        +'<div style="font-family:var(--mono);font-size:10px;font-weight:700;color:#7aadff;letter-spacing:.8px;text-transform:uppercase">Your AI Plan</div>'
+        +'<button id="clear-ai-plan" style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.3);background:none;border:none;cursor:pointer;letter-spacing:.3px">reset plan</button>'
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">'
+        +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--accent)">'+plan.calories+'</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">KCAL</div></div>'
+        +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:#5b9fff">'+plan.protein+'g</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">PROTEIN</div></div>'
+        +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--gold)">'+plan.carbs+'g</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">CARBS</div></div>'
+        +'<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 6px"><div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--red)">'+plan.fat+'g</div><div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.4);margin-top:2px">FAT</div></div>'
+        +'</div>'
+        +'<div style="font-size:12px;color:rgba(255,255,255,.65);line-height:1.7">'+esc(plan.advice)+'</div>'
+        +(plan.weeklyChange?'<div style="margin-top:8px;font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.35)">Expected: <span style="color:var(--green2)">'+(plan.weeklyChange>0?'+':'')+plan.weeklyChange+' lbs/week</span></div>':'')
+        +'</div>'
+      :'<div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.25);text-align:center;letter-spacing:.3px">Fill in your details above and hit generate</div>'
+    )
+  ):(
+    // ── Manual tab
+    '<div style="margin-top:4px">'
+    +'<div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.35);margin-bottom:12px;letter-spacing:.3px">Enter your own daily targets</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">calories / day</label>'
+    +'<input type="number" id="man-cal" placeholder="2000" value="'+(fg.targetCalories||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">protein goal (g)</label>'
+    +'<input type="number" id="man-protein" placeholder="150" value="'+(S.macGoals&&S.macGoals.protein||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">carbs goal (g)</label>'
+    +'<input type="number" id="man-carbs" placeholder="200" value="'+(S.macGoals&&S.macGoals.carbs||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">fat goal (g)</label>'
+    +'<input type="number" id="man-fat" placeholder="65" value="'+(S.macGoals&&S.macGoals.fat||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">current weight (lbs)</label>'
+    +'<input type="number" id="man-curweight" placeholder="175" value="'+(fg.currentWeight||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
+    +'<div><label class="flabel" style="margin-top:0;color:rgba(255,255,255,.4)">target weight (lbs)</label>'
+    +'<input type="number" id="man-tgtweight" placeholder="165" value="'+(fg.targetWeight||'')+'" style="margin:0;background:#1e2d40;border-color:rgba(255,255,255,.1);color:#fff"/></div>'
     +'</div>'
-    +'<div style="font-size:12px;color:rgba(255,255,255,.65);line-height:1.7;font-family:var(--sans)">'+esc(plan.advice)+'</div>'
-    +(plan.weeklyChange?'<div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.4)">Expected: <span style="color:var(--green2)">'+(plan.weeklyChange>0?'+':'')+plan.weeklyChange+' lbs/week</span></div>':'')
+    +'<button class="btn btn-primary" id="save-manual-plan" style="background:linear-gradient(135deg,#1d9e6f,#24c489);box-shadow:0 4px 14px rgba(29,158,111,.3)">Save My Plan</button>'
     +'</div>'
-  :'<div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.3);text-align:center;letter-spacing:.3px">Fill in your details above and generate your plan</div>')
+  ))
   +'</div>'
 
   // ── Daily Nutrition Summary ──
@@ -1168,31 +1135,40 @@ function tplNutrition(){
   +'</div>'
 
   // ── Meal Log ──
-  +(meals.length?'<div class="card"><div class="ctitle" style="margin-bottom:14px">Meal Log</div>'+(mealsByCategory||'')+'</div>':'')
+  +(meals.length?'<div class="card"><div class="ctitle" style="margin-bottom:14px">Meal Log</div>'+mealsByCategory+'</div>':'')
 
   // ── Weight Progress ──
   +'<div class="card">'
-  +'<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap">'
+  +'<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap">'
   +'<div><div class="ctitle">Weight Progress</div>'
   +'<div class="csub" style="margin-top:4px">'
-  +(startWeight?'<span style="color:var(--text2)">Start: <strong>'+startWeight+' lbs</strong></span>':'<span style="color:var(--text3)">Set current weight in coach above</span>')
+  +(startWeight?'Start: <strong>'+startWeight+' lbs</strong>':'<span style="color:var(--text3)">Set current weight in plan above</span>')
   +(fg.targetWeight?' &nbsp;·&nbsp; <span style="color:var(--purple)">Goal: <strong>'+fg.targetWeight+' lbs</strong></span>':'')
   +(weeksToGoal?' &nbsp;·&nbsp; <span style="color:var(--green)">'+weeksToGoal+'</span>':'')
   +'</div>'
-  +(weeklyDelta!==0?'<div style="font-family:var(--mono);font-size:10px;margin-top:4px;color:'+(weeklyDelta<0?'var(--teal)':'var(--green2)')+'">Expected '+(weeklyDelta>0?'+':'')+weeklyDelta+' lbs/week</div>':'')
+  +(weeklyDelta!==0?'<div style="font-family:var(--mono);font-size:10px;margin-top:3px;color:'+(weeklyDelta<0?'var(--teal)':'var(--green2)')+'">Expected '+(weeklyDelta>0?'+':'')+weeklyDelta+' lbs/week</div>':'')
   +'</div>'
   +'<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'
-  +'<input type="number" id="wt-input" placeholder="lbs" value="'+weightInputVal+'" style="width:88px;margin:0;padding:7px 10px;font-size:12px"/>'
+  +'<input type="number" id="wt-input" placeholder="lbs" value="'+weightInputVal+'" style="width:80px;margin:0;padding:7px 10px;font-size:12px"/>'
   +'<button class="btn btn-sm btn-green" id="log-weight-btn">Log</button>'
   +'</div></div>'
   +(allVals.length
     ? weightSVG
-      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--text3)">'
-      +'<span style="display:flex;align-items:center;gap:5px"><svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--accent)" stroke-width="2.5"/></svg>Logged</span>'
-      +(expPath?'<span style="display:flex;align-items:center;gap:5px"><svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--green2)" stroke-width="1.5" stroke-dasharray="5,3"/></svg>Expected trend</span>':'')
-      +(fg.targetWeight?'<span style="display:flex;align-items:center;gap:5px"><svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--purple)" stroke-width="1.5" stroke-dasharray="3,3"/></svg>Target</span>':'')
+      +'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:6px;letter-spacing:.3px">Click any dot on the chart to delete that entry</div>'
+      +'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--text3)">'
+      +'<span style="display:flex;align-items:center;gap:5px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="var(--accent)" stroke-width="2.5"/></svg>Logged</span>'
+      +(expPath?'<span style="display:flex;align-items:center;gap:5px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="var(--green2)" stroke-width="1.5" stroke-dasharray="5,3"/></svg>Expected</span>':'')
+      +(fg.targetWeight?'<span style="display:flex;align-items:center;gap:5px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="var(--purple)" stroke-width="1.5" stroke-dasharray="3,3"/></svg>Target</span>':'')
       +'</div>'
-    : '<div class="empty" style="padding:20px 0"><div class="empty-icon">📉</div><div class="empty-txt">Log your weight daily to track progress<br><span style="opacity:.6">Use the AI Coach above to set your starting weight & goal</span></div></div>'
+    : '<div class="empty" style="padding:16px 0"><div class="empty-icon">📉</div><div class="empty-txt">Log your weight to see progress<br><span style="opacity:.6">Use the plan above to set your starting & target weight</span></div></div>'
+  )
+  // Weight log list
+  +(sortedWeightEntries.length
+    ?'<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">'
+      +'<div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:6px">Recent Entries</div>'
+      +weightLogRows
+      +'</div>'
+    :''
   )
   +'</div>'
   +'</div>';
@@ -1398,24 +1374,14 @@ function bindContent(){
     S.fitnessGoal.currentWeight=cw;S.fitnessGoal.targetWeight=tw;S.fitnessGoal.activityLevel=activity;
     saveState();
     aiCoachBtn.disabled=true;aiCoachBtn.textContent='⏳ Generating plan...';
-    var prompt='You are a certified nutrition coach. Calculate a personalized nutrition plan.\n'
-      +'User: '+sex+', age '+age+', height '+(hft*12+hin)+' inches, current weight '+cw+' lbs'+(tw?', target weight '+tw+' lbs':'')+', activity level: '+activity+', goal: '+mode+'.\n'
-      +'Use the Mifflin-St Jeor formula to calculate BMR, then apply the activity multiplier for TDEE.\n'
-      +'For goal "deficit" subtract 400-500 kcal for ~0.75 lbs/week loss. For "surplus" add 300-400 kcal for ~0.5 lbs/week gain. For "maintain" use TDEE.\n'
-      +'Calculate protein (0.8-1g per lb for deficit/maintain, 1-1.2g for surplus), fat (25-30% of calories), carbs (remaining calories).\n'
-      +'Respond ONLY with valid JSON, no markdown, no explanation outside the JSON:\n'
-      +'{"calories":NUMBER,"protein":NUMBER,"carbs":NUMBER,"fat":NUMBER,"weeklyChange":NUMBER_WITH_SIGN,"advice":"2-3 sentence personalized coaching tip"}\n'
-      +'weeklyChange should be negative for deficit (e.g. -0.75), positive for surplus (e.g. 0.5), 0 for maintain.';
-    fetch('https://api.anthropic.com/v1/messages',{
+    fetch('/api/nutrition-plan',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({sex:sex,age:age,heightInches:(hft*12+hin),currentWeight:cw,targetWeight:tw,activityLevel:activity,mode:mode})
     })
     .then(function(r){return r.json();})
-    .then(function(data){
-      var text=(data.content&&data.content[0]&&data.content[0].text)||'';
-      var clean=text.replace(/```json|```/g,'').trim();
-      var plan=JSON.parse(clean);
+    .then(function(plan){
+      if(plan.error) throw new Error(plan.error);
       if(!S.fitnessGoal) S.fitnessGoal={};
       S.fitnessGoal.aiPlan=plan;
       S.fitnessGoal.targetCalories=plan.calories;
@@ -1428,26 +1394,60 @@ function bindContent(){
     });
   });
 
-  // Save Fitness Goal (legacy fallback — no longer a button but keep for safety)
-  var saveFitnessGoalBtn=document.getElementById('save-fitness-goal');
-  if(saveFitnessGoalBtn)saveFitnessGoalBtn.addEventListener('click',function(){
+  // Plan tab toggle — AI vs Manual
+  var planTabAI=document.getElementById('plan-tab-ai');
+  var planTabManual=document.getElementById('plan-tab-manual');
+  if(planTabAI) planTabAI.addEventListener('click',function(){S.nutritionManualMode=false;saveState();renderTab();});
+  if(planTabManual) planTabManual.addEventListener('click',function(){S.nutritionManualMode=true;saveState();renderTab();});
+
+  // Save Manual Plan
+  var saveManualBtn=document.getElementById('save-manual-plan');
+  if(saveManualBtn) saveManualBtn.addEventListener('click',function(){
+    var cal=parseInt(document.getElementById('man-cal').value)||2000;
+    var protein=parseInt(document.getElementById('man-protein').value)||150;
+    var carbs=parseInt(document.getElementById('man-carbs').value)||200;
+    var fat=parseInt(document.getElementById('man-fat').value)||65;
+    var cw=parseFloat(document.getElementById('man-curweight').value)||null;
+    var tw=parseFloat(document.getElementById('man-tgtweight').value)||null;
     if(!S.fitnessGoal) S.fitnessGoal={mode:'maintain'};
-    var cal=parseInt(document.getElementById('ng-calories')&&document.getElementById('ng-calories').value)||2000;
-    S.fitnessGoal.targetCalories=cal;S.macGoals=S.macGoals||{};S.macGoals.calories=cal;
-    saveState();showToast('goal saved ✓');renderTab();
+    S.fitnessGoal.targetCalories=cal;
+    S.fitnessGoal.currentWeight=cw;
+    S.fitnessGoal.targetWeight=tw;
+    S.fitnessGoal.aiPlan=null; // clear any AI plan so manual takes over
+    S.macGoals={calories:cal,protein:protein,carbs:carbs,fat:fat};
+    saveState();showToast('plan saved ✓');renderTab();
+  });
+
+  // Clear AI plan (reset link)
+  var clearAIPlanBtn=document.getElementById('clear-ai-plan');
+  if(clearAIPlanBtn) clearAIPlanBtn.addEventListener('click',function(){
+    if(!S.fitnessGoal) return;
+    S.fitnessGoal.aiPlan=null;
+    saveState();showToast('plan cleared');renderTab();
   });
 
   // Log weight
   var logWeightBtn=document.getElementById('log-weight-btn');
-  if(logWeightBtn)logWeightBtn.addEventListener('click',function(){
+  if(logWeightBtn) logWeightBtn.addEventListener('click',function(){
     var val=parseFloat(document.getElementById('wt-input').value);
     if(!val||val<=0) return showToast('enter a valid weight');
     var dk=dateKey(selDate);
     if(!S.weightByDate) S.weightByDate={};
     S.weightByDate[dk]={weight:val,unit:'lbs',loggedAt:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})};
-    // Also update currentWeight if logging today
     if(sameDay(selDate,today)){if(!S.fitnessGoal)S.fitnessGoal={};S.fitnessGoal.currentWeight=val;}
     saveState();showToast('weight logged: '+val+' lbs');renderTab();
+  });
+
+  // Delete weight entry — from chart dots AND from list rows
+  document.querySelectorAll('[data-del-weight]').forEach(function(el){
+    el.addEventListener('click',function(e){
+      e.stopPropagation();
+      var dk=el.getAttribute('data-del-weight');
+      if(S.weightByDate&&S.weightByDate[dk]){
+        delete S.weightByDate[dk];
+        saveState();showToast('entry deleted');renderTab();
+      }
+    });
   });
 
   // Fitness
