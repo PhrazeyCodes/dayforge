@@ -889,13 +889,16 @@ function tplGoals(){
 function tplHourlyCal(){
   var dk=dateKey(selDate);
   var events=eventsForDate(selDate).slice();
-  // Inject recurring events that cover this date
+  // Inject recurring events that cover this date and match day-of-week filter
   (S.recurEvents||[]).forEach(function(rev){
     if(!rev.recurStart||!rev.recurEnd) return;
-    var cur=dk;
-    if(cur>=rev.recurStart&&cur<=rev.recurEnd){
-      events.push(Object.assign({},rev,{isRecur:true,id:rev.id+'_'+dk}));
+    if(dk<rev.recurStart||dk>rev.recurEnd) return;
+    // If recurDays is set and non-empty, check day of week matches
+    if(rev.recurDays&&rev.recurDays.length>0){
+      var dow=new Date(dk+'T00:00:00').getDay();
+      if(rev.recurDays.indexOf(dow)<0) return;
     }
+    events.push(Object.assign({},rev,{isRecur:true,id:rev.id+'_'+dk}));
   });
 
   var isToday=sameDay(selDate,today);
@@ -1679,54 +1682,182 @@ function bindContent(){
 }
 
 // ── HOURLY CALENDAR EVENT MODAL ──
+// ── Time parsing helpers ──────────────────────────────────────────────────────
+// Accepts: "1pm", "1:30pm", "13:00", "9", "9:30", "930", "9am"
+function parseTimeInput(str){
+  if(!str) return null;
+  str=str.trim().toLowerCase().replace(/\s/g,'');
+  var isPM=str.indexOf('pm')>=0, isAM=str.indexOf('am')>=0;
+  str=str.replace('am','').replace('pm','');
+  var h,m=0;
+  if(str.indexOf(':')>=0){
+    var parts=str.split(':');
+    h=parseInt(parts[0]); m=parseInt(parts[1])||0;
+  } else if(str.length>2){
+    // e.g. "930" → 9:30, "1230" → 12:30
+    m=parseInt(str.slice(-2)); h=parseInt(str.slice(0,-2));
+  } else {
+    h=parseInt(str);
+  }
+  if(isNaN(h)) return null;
+  if(isPM&&h<12) h+=12;
+  if(isAM&&h===12) h=0;
+  h=Math.max(0,Math.min(23,h));
+  m=Math.max(0,Math.min(59,m||0));
+  return{h:h,m:m};
+}
+function fmtTimeInput(h,m){
+  // Display as "9:00am" / "1:30pm"
+  var ampm=h<12?'am':'pm';
+  var dh=h%12||12;
+  return dh+':'+(m<10?'0':'')+m+ampm;
+}
+
+// ── Custom date picker ────────────────────────────────────────────────────────
+function buildDatePicker(inputId, initialValue){
+  // initialValue: 'YYYY-MM-DD' or ''
+  var months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var days=['Su','Mo','Tu','We','Th','Fr','Sa'];
+  var now=new Date();
+  var curYear=now.getFullYear(), curMonth=now.getMonth();
+  var selVal=initialValue||'';
+  var viewYear=curYear, viewMonth=curMonth;
+  if(selVal){var d=new Date(selVal+'T00:00:00');viewYear=d.getFullYear();viewMonth=d.getMonth();}
+
+  var container=document.createElement('div');
+  container.style.cssText='position:relative;width:100%';
+
+  var displayBtn=document.createElement('button');
+  displayBtn.type='button';
+  displayBtn.style.cssText='width:100%;text-align:left;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-family:var(--sans);font-size:13px;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:space-between;';
+  function fmtDisplay(val){
+    if(!val) return '<span style="color:var(--text3)">Select date…</span>';
+    var d=new Date(val+'T00:00:00');
+    return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+  }
+  displayBtn.innerHTML=fmtDisplay(selVal)+'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 7V3M16 7V3M3 11h18M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"/></svg>';
+
+  var hidden=document.createElement('input');
+  hidden.type='hidden'; hidden.id=inputId; hidden.value=selVal;
+
+  var dropdown=document.createElement('div');
+  dropdown.style.cssText='position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 32px rgba(28,21,16,.14);z-index:300;padding:14px;display:none;';
+
+  function renderCal(){
+    var firstDay=new Date(viewYear,viewMonth,1).getDay();
+    var daysInMonth=new Date(viewYear,viewMonth+1,0).getDate();
+    var todayStr=dateKey(new Date());
+
+    var html='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+      +'<button type="button" id="dp-prev-'+inputId+'" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:14px;color:var(--text2)">‹</button>'
+      +'<span style="font-family:var(--display);font-size:13px;font-weight:700;color:var(--text)">'+months[viewMonth]+' '+viewYear+'</span>'
+      +'<button type="button" id="dp-next-'+inputId+'" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:14px;color:var(--text2)">›</button>'
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px">'
+      +days.map(function(d){return'<div style="text-align:center;font-family:var(--mono);font-size:9px;color:var(--text3);padding:3px 0;letter-spacing:.3px">'+d+'</div>';}).join('')
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">';
+
+    for(var i=0;i<firstDay;i++) html+='<div></div>';
+    for(var d=1;d<=daysInMonth;d++){
+      var dStr=viewYear+'-'+(viewMonth<9?'0':'')+(viewMonth+1)+'-'+(d<10?'0':'')+d;
+      var isSelected=dStr===selVal;
+      var isToday=dStr===todayStr;
+      var isPast=dStr<todayStr;
+      html+='<button type="button" data-dp-date="'+dStr+'" style="'
+        +'border:none;border-radius:8px;padding:5px 2px;font-family:var(--mono);font-size:11px;cursor:pointer;transition:all .12s;'
+        +(isSelected?'background:var(--accent);color:white;font-weight:700;':'background:'+(isToday?'rgba(232,98,42,.1)':'transparent')+';color:'+(isPast?'var(--text3)':'var(--text)')+';')
+        +'">'+d+'</button>';
+    }
+    html+='</div>';
+    dropdown.innerHTML=html;
+
+    dropdown.querySelector('#dp-prev-'+inputId).addEventListener('click',function(){
+      viewMonth--;if(viewMonth<0){viewMonth=11;viewYear--;}renderCal();
+    });
+    dropdown.querySelector('#dp-next-'+inputId).addEventListener('click',function(){
+      viewMonth++;if(viewMonth>11){viewMonth=0;viewYear++;}renderCal();
+    });
+    dropdown.querySelectorAll('[data-dp-date]').forEach(function(btn){
+      btn.addEventListener('click',function(){
+        selVal=btn.getAttribute('data-dp-date');
+        hidden.value=selVal;
+        displayBtn.innerHTML=fmtDisplay(selVal)+'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 7V3M16 7V3M3 11h18M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"/></svg>';
+        dropdown.style.display='none';
+      });
+    });
+  }
+
+  displayBtn.addEventListener('click',function(e){
+    e.stopPropagation();
+    var isOpen=dropdown.style.display==='block';
+    dropdown.style.display=isOpen?'none':'block';
+    if(!isOpen) renderCal();
+  });
+  document.addEventListener('click',function(){dropdown.style.display='none';},{once:false});
+
+  container.appendChild(displayBtn);
+  container.appendChild(hidden);
+  container.appendChild(dropdown);
+  return container;
+}
+
 function openEventModal(defaultHour, existingEvent){
   var modal=document.getElementById('event-modal');
   var h=defaultHour!=null?defaultHour:9;
   var endH=existingEvent?existingEvent.endHour:Math.min(23,h+1);
   var isEdit=!!existingEvent;
-  var isRecurring=existingEvent&&existingEvent.isRecurringDef;
-  var ev=existingEvent||{title:'',startHour:h,startMin:0,endHour:endH,endMin:0,type:'',gcal:false,recurStart:'',recurEnd:''};
+  var ev=existingEvent||{title:'',startHour:h,startMin:0,endHour:endH,endMin:0,type:'',gcal:false,recurStart:'',recurEnd:'',recurDays:[]};
 
-  // Quick-type suggestion chips
   var suggestions=['Personal','Work','Meeting','Workout','School','Other'];
   var chipHTML=suggestions.map(function(t){
     return'<button type="button" class="type-btn off" data-chip="'+t+'" style="font-size:10px;padding:3px 10px">'+t+'</button>';
+  }).join('');
+
+  var existingRecurDays=ev.recurDays||[];
+  var dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var dayChips=dayNames.map(function(d,i){
+    var on=existingRecurDays.indexOf(i)>=0;
+    return'<button type="button" class="type-btn '+(on?'on':'off')+'" data-dow="'+i+'" style="font-size:10px;padding:3px 9px;min-width:40px">'+d+'</button>';
   }).join('');
 
   modal.innerHTML='<div class="modal-title">'+(isEdit?'Edit Event':'Add Event')+'</div>'
     +'<div class="modal-sub">'+selDate.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})+'</div>'
     +'<label class="flabel" style="margin-top:0">event title</label>'
     +'<input type="text" id="ev-title" placeholder="e.g. Team standup, Morning run" value="'+esc(ev.title)+'"/>'
-
-    // Free-text type
     +'<label class="flabel">type <span style="color:var(--text3);font-weight:400">(type your own or pick one)</span></label>'
     +'<input type="text" id="ev-type-input" placeholder="e.g. Work, Gym, School..." value="'+esc(ev.type||'')+'" style="margin-bottom:6px"/>'
     +'<div class="type-btns" id="ev-type-chips" style="flex-wrap:wrap;gap:5px">'+chipHTML+'</div>'
 
-    // Times
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">'
+    // Time inputs — natural language
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">'
     +'<div><label class="flabel">start time</label>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
-    +'<input type="number" id="ev-sh" min="0" max="23" value="'+ev.startHour+'" placeholder="Hr"/>'
-    +'<input type="number" id="ev-sm" min="0" max="59" value="'+(ev.startMin||0)+'" placeholder="Min"/>'
-    +'</div></div>'
-    +'<div><label class="flabel">end time</label>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
-    +'<input type="number" id="ev-eh" min="0" max="23" value="'+ev.endHour+'" placeholder="Hr"/>'
-    +'<input type="number" id="ev-em" min="0" max="59" value="'+(ev.endMin||0)+'" placeholder="Min"/>'
-    +'</div></div>'
+    +'<input type="text" id="ev-start-time" placeholder="e.g. 9am, 1:30pm" value="'+fmtTimeInput(ev.startHour,ev.startMin||0)+'" style="text-align:center"/>'
     +'</div>'
+    +'<div><label class="flabel">end time</label>'
+    +'<input type="text" id="ev-end-time" placeholder="e.g. 11am, 2:30pm" value="'+fmtTimeInput(ev.endHour,ev.endMin||0)+'" style="text-align:center"/>'
+    +'</div></div>'
+    +'<div id="ev-time-err" style="font-family:var(--mono);font-size:10px;color:var(--red);margin-top:4px;display:none">invalid time format — try "9am" or "1:30pm"</div>'
 
     // Recurring toggle
-    +'<div style="display:flex;align-items:center;gap:8px;margin-top:12px;margin-bottom:4px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-top:14px;margin-bottom:6px">'
     +'<input type="checkbox" id="ev-recur-chk" style="width:16px;height:16px;accent-color:var(--accent)"'+(ev.recurStart?' checked':'')+'>'
     +'<label for="ev-recur-chk" style="font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;letter-spacing:.2px">Repeat across a date range</label>'
     +'</div>'
-    +'<div id="ev-recur-fields" style="display:'+(ev.recurStart?'grid':'none')+';grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">'
-    +'<div><label class="flabel" style="margin-top:0">start date</label>'
-    +'<input type="date" id="ev-rstart" value="'+(ev.recurStart||dateKey(selDate))+'"/></div>'
-    +'<div><label class="flabel" style="margin-top:0">end date</label>'
-    +'<input type="date" id="ev-rend" value="'+(ev.recurEnd||'')+'" placeholder="End date"/></div>'
+    +'<div id="ev-recur-fields" style="display:'+(ev.recurStart?'flex':'none')+';flex-direction:column;gap:10px;padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;margin-bottom:6px">'
+    // Day of week chips
+    +'<div>'
+    +'<div style="font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">Repeat on</div>'
+    +'<div id="ev-dow-chips" style="display:flex;gap:5px;flex-wrap:wrap">'+dayChips+'</div>'
+    +'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:5px">Leave all unselected to repeat every day</div>'
+    +'</div>'
+    // Date range pickers
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +'<div><div style="font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">Start date</div>'
+    +'<div id="dp-rstart-wrap"></div></div>'
+    +'<div><div style="font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">End date</div>'
+    +'<div id="dp-rend-wrap"></div></div>'
+    +'</div>'
     +'</div>'
 
     +'<button class="mbtn prim" id="ev-save">'+(isEdit?'Update Event':'Add to Calendar')+'</button>'
@@ -1735,7 +1866,13 @@ function openEventModal(defaultHour, existingEvent){
 
   document.getElementById('event-overlay').style.display='flex';
 
-  // Chip clicks fill the type input
+  // Mount custom date pickers into their wrapper divs
+  var rStartPicker=buildDatePicker('ev-rstart', ev.recurStart||dateKey(selDate));
+  var rEndPicker=buildDatePicker('ev-rend', ev.recurEnd||'');
+  document.getElementById('dp-rstart-wrap').appendChild(rStartPicker);
+  document.getElementById('dp-rend-wrap').appendChild(rEndPicker);
+
+  // Type chips
   modal.querySelectorAll('[data-chip]').forEach(function(btn){
     btn.addEventListener('click',function(){
       var t=btn.getAttribute('data-chip');
@@ -1743,39 +1880,58 @@ function openEventModal(defaultHour, existingEvent){
       modal.querySelectorAll('[data-chip]').forEach(function(b){b.className='type-btn '+(b.getAttribute('data-chip')===t?'on':'off');});
     });
   });
-  // Typing in the input clears chip selection
   document.getElementById('ev-type-input').addEventListener('input',function(){
     modal.querySelectorAll('[data-chip]').forEach(function(b){b.className='type-btn off';});
   });
 
-  // Recur toggle shows/hides fields
+  // Day-of-week chips (toggle)
+  modal.querySelectorAll('[data-dow]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var on=btn.classList.contains('on');
+      btn.className='type-btn '+(on?'off':'on');
+    });
+  });
+
+  // Recur toggle
   document.getElementById('ev-recur-chk').addEventListener('change',function(){
-    document.getElementById('ev-recur-fields').style.display=this.checked?'grid':'none';
+    document.getElementById('ev-recur-fields').style.display=this.checked?'flex':'none';
   });
 
   document.getElementById('ev-save').addEventListener('click',function(){
     var title=document.getElementById('ev-title').value.trim();
     if(!title) return showToast('enter an event title');
-    var sh=parseInt(document.getElementById('ev-sh').value)||0;
-    var sm=parseInt(document.getElementById('ev-sm').value)||0;
-    var eh=parseInt(document.getElementById('ev-eh').value);
-    if(isNaN(eh)) eh=Math.min(23,sh+1);
-    var em=parseInt(document.getElementById('ev-em').value)||0;
+
+    // Parse natural language times
+    var startParsed=parseTimeInput(document.getElementById('ev-start-time').value);
+    var endParsed=parseTimeInput(document.getElementById('ev-end-time').value);
+    var timeErr=document.getElementById('ev-time-err');
+    if(!startParsed||!endParsed){timeErr.style.display='block';return;}
+    timeErr.style.display='none';
+    var sh=startParsed.h, sm=startParsed.m, eh=endParsed.h, em=endParsed.m;
+
     var typeVal=(document.getElementById('ev-type-input').value.trim()||'personal').toLowerCase();
     var isRecur=document.getElementById('ev-recur-chk').checked;
+
+    // Collect selected days of week
+    var recurDays=[];
+    if(isRecur){
+      modal.querySelectorAll('[data-dow]').forEach(function(btn){
+        if(btn.classList.contains('on')) recurDays.push(parseInt(btn.getAttribute('data-dow')));
+      });
+    }
+
     var rStart=isRecur?(document.getElementById('ev-rstart').value||dateKey(selDate)):'';
     var rEnd=isRecur?(document.getElementById('ev-rend').value||''):'';
     if(isRecur&&!rEnd) return showToast('set an end date for recurring event');
 
     if(isRecur){
-      // Save as a recurring event definition
       if(!S.recurEvents) S.recurEvents=[];
       if(isEdit&&ev.isRecurringDef){
         S.recurEvents=S.recurEvents.map(function(r){
-          return r.id===ev.id?Object.assign({},r,{title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal,recurStart:rStart,recurEnd:rEnd}):r;
+          return r.id===ev.id?Object.assign({},r,{title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal,recurStart:rStart,recurEnd:rEnd,recurDays:recurDays}):r;
         });
       } else {
-        S.recurEvents.push({id:'rev_'+Date.now(),title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal,recurStart:rStart,recurEnd:rEnd,isRecurringDef:true});
+        S.recurEvents.push({id:'rev_'+Date.now(),title:title,startHour:sh,startMin:sm,endHour:eh,endMin:em,type:typeVal,recurStart:rStart,recurEnd:rEnd,recurDays:recurDays,isRecurringDef:true});
       }
     } else {
       var dk=dateKey(selDate);
@@ -1801,8 +1957,7 @@ function openEventModal(defaultHour, existingEvent){
     document.getElementById('ev-delete').addEventListener('click',function(){
       var dk=dateKey(selDate);
       if(ev.isRecurringDef||ev.isRecur){
-        // Delete the recurring definition
-        var rid=ev.id.replace(/_\d{4}-\d{2}-\d{2}$/,''); // strip _dk suffix from instance id
+        var rid=ev.id.replace(/_\d{4}-\d{2}-\d{2}$/,'');
         S.recurEvents=(S.recurEvents||[]).filter(function(r){return r.id!==rid&&r.id!==ev.id;});
       } else {
         if(S.calEvents[dk]) S.calEvents[dk]=S.calEvents[dk].filter(function(e){return e.id!==ev.id;});
