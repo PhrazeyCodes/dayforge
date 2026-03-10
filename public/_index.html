@@ -1617,6 +1617,7 @@ function init(){
       }catch(e){}
     }
     // Handle Strava callback
+    var urlParams=new URLSearchParams(window.location.search);
     if(urlParams.get('strava')==='connected'){
       var stravaToken=urlParams.get('access_token');
       var stravaRefresh=urlParams.get('refresh_token');
