@@ -1348,10 +1348,51 @@ function tplFitness(){
 }
 
 // ── AI Calorie Estimator ──
+// ── Client-side calorie estimate cache ──
+// Keyed by type|duration(rounded5)|weight(rounded5)|sex|notesIntensity
+// Stored in localStorage so it persists across sessions
+function getEstimateCache(){
+  try{var c=localStorage.getItem('df_cal_cache');return c?JSON.parse(c):{};}catch(e){return {};}
+}
+function setEstimateCache(key,val){
+  try{
+    var c=getEstimateCache();
+    c[key]=val;
+    // Keep cache under 200 entries
+    var keys=Object.keys(c);
+    if(keys.length>200) delete c[keys[0]];
+    localStorage.setItem('df_cal_cache',JSON.stringify(c));
+  }catch(e){}
+}
+function buildEstimateCacheKey(sess,fg){
+  var dur=Math.round((parseInt(sess.duration)||30)/5)*5;
+  var wgt=fg.currentWeight?Math.round(parseFloat(fg.currentWeight)/5)*5:175;
+  var sex=fg.sex||'unknown';
+  var notes=sess.notes&&/(heavy|max|sprint|intense|hiit)/i.test(sess.notes)?'intense':'normal';
+  return [(sess.type||'').toLowerCase(),dur,wgt,sex,notes].join('|');
+}
+
 function doEstimateCalories(sessionId, dk){
   var sess=S.sessionsByDate[dk]&&S.sessionsByDate[dk].find(function(s){return s.id===sessionId;});
   if(!sess) return;
   var fg=S.fitnessGoal||{};
+
+  // ── Check client cache first ──
+  var cacheKey=buildEstimateCacheKey(sess,fg);
+  var cached=getEstimateCache()[cacheKey];
+  if(cached){
+    S.sessionsByDate[dk]=S.sessionsByDate[dk].map(function(s){
+      return s.id===sessionId?Object.assign({},s,{caloriesBurned:cached.calories,burnNote:cached.note,intensity:cached.intensity,estimating:false}):s;
+    });
+    var sessionBurned=S.sessionsByDate[dk].reduce(function(sum,s){return sum+(s.caloriesBurned||0);},0);
+    if(!S.healthByDate) S.healthByDate={};
+    S.healthByDate[dk]=Object.assign({},S.healthByDate[dk]||{},{sessionBurned:sessionBurned});
+    saveState();
+    if(curTab==='fitness') renderTab();
+    showToast('🔥 ~'+cached.calories+' kcal (cached)');
+    return;
+  }
+
   fetch('/api/estimate-calories',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -1369,10 +1410,11 @@ function doEstimateCalories(sessionId, dk){
   .then(function(data){
     if(data.error) throw new Error(data.error);
     if(!S.sessionsByDate[dk]) return;
+    // Save to client cache (skip if server already cached it)
+    setEstimateCache(cacheKey,{calories:data.calories,note:data.note,intensity:data.intensity});
     S.sessionsByDate[dk]=S.sessionsByDate[dk].map(function(s){
       return s.id===sessionId?Object.assign({},s,{caloriesBurned:data.calories,burnNote:data.note,intensity:data.intensity,estimating:false}):s;
     });
-    // Sync total session burn to healthByDate so nutrition tab picks it up
     var sessionBurned=S.sessionsByDate[dk].reduce(function(sum,s){return sum+(s.caloriesBurned||0);},0);
     if(!S.healthByDate) S.healthByDate={};
     var existing=S.healthByDate[dk]||{};
