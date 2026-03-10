@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default async function handler(req, res) {
   try {
-    const htmlPath = join(__dirname, '..', 'public', 'index.html');
+    const htmlPath = join(__dirname, '..', 'public', '_index.html');
     let html = readFileSync(htmlPath, 'utf8');
 
     const envScript = `<script>
