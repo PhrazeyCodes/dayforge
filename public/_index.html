@@ -345,7 +345,7 @@ textarea::placeholder,input::placeholder{color:var(--text3)}
     <div class="signin-sub">Your personal daily OS for self-improvement.<br>Sign in to sync your data across all devices.</div>
     <div class="signin-features">
       <div class="signin-feature"><div class="signin-feature-icon" style="background:rgba(232,98,42,.1)">📓</div><span>Morning & evening journals with daily history</span></div>
-      <div class="signin-feature"><div class="signin-feature-icon" style="background:rgba(29,158,111,.1)">🎯</div><span>Goals & hourly day planner with Google Calendar</span></div>
+      <div class="signin-feature"><div class="signin-feature-icon" style="background:rgba(29,158,111,.1)">🎯</div><span>Goals & hourly day planner</span></div>
       <div class="signin-feature"><div class="signin-feature-icon" style="background:rgba(42,106,240,.1)">🥗</div><span>Nutrition tracking with AI food scanning</span></div>
       <div class="signin-feature"><div class="signin-feature-icon" style="background:rgba(118,87,214,.1)">💪</div><span>Fitness tracking with Strava integration</span></div>
     </div>
@@ -476,10 +476,11 @@ var DEFAULT_S={
   showAddSession:false,
   sessionType:'Lifting',
   healthByDate:{},
-  calEvents:{},        // keyed by 'YYYY-MM-DD': [{id,title,startHour,startMin,endHour,endMin,type,gcal}]
-  gcalConnected:false,
-  gcalToken:null,
+  calEvents:{},        // keyed by 'YYYY-MM-DD': [{id,title,startHour,startMin,endHour,endMin,type}]
   strava:null,
+  fitnessGoal:{mode:'maintain',targetCalories:2000,targetWeight:null,currentWeight:null,weeklyChange:0},
+  weightByDate:{},     // keyed by 'YYYY-MM-DD': {weight, unit:'lbs'}
+
 };
 
 var LS_KEY='dayforge_v3';
@@ -493,7 +494,8 @@ function eveningForDate(d){return(S.eveningsByDate&&S.eveningsByDate[dateKey(d)]
 function eventsForDate(d){return(S.calEvents&&S.calEvents[dateKey(d)])||[];}
 function allSessions(){var all=[];Object.values(S.sessionsByDate||{}).forEach(function(arr){all=all.concat(arr||[]);});return all;}
 function healthForDate(d){return(S.healthByDate&&S.healthByDate[dateKey(d)])||{burned:0,steps:0,activeMin:0,source:''};}
-function macTotalsForDate(d){var meals=mealsForDate(d);return meals.reduce(function(a,m){return{p:a.p+m.p,c:a.c+m.c,f:a.f+m.f,cal:a.cal+m.cal};},{p:0,c:0,f:0,cal:0});}
+function weightForDate(d){return(S.weightByDate&&S.weightByDate[dateKey(d)])||null;}
+var meals=mealsForDate(d);return meals.reduce(function(a,m){return{p:a.p+m.p,c:a.c+m.c,f:a.f+m.f,cal:a.cal+m.cal};},{p:0,c:0,f:0,cal:0});}
 
 function loadState(){
   try{
@@ -659,11 +661,12 @@ function tplDashboard(){
   var dGoals=goalsForDate(selDate);
   var t=macTotalsForDate(selDate);
   var done=dGoals.filter(function(g){return g.done;}).length;
-  var calPct=pct(t.cal,S.macGoals.calories);
+  var calPct=pct(t.cal,(S.fitnessGoal&&S.fitnessGoal.targetCalories)||S.macGoals.calories||2000);
   var isToday=sameDay(selDate,today);
   var q=QUOTES[today.getDate()%QUOTES.length];
   var pendingGoals=dGoals.filter(function(g){return !g.done;});
-  var calRemainder=Math.max(0,(S.macGoals.calories||2000)-t.cal);
+  var calGoalDash=(S.fitnessGoal&&S.fitnessGoal.targetCalories)||S.macGoals.calories||2000;
+  var calRemainder=Math.max(0,calGoalDash-t.cal);
   var hour=new Date().getHours();
   var greeting=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
   var todaySessions=sessionsForDate(selDate);
@@ -733,7 +736,7 @@ function tplDashboard(){
   html+='<div class="df-stat-block">';
   html+='<div class="df-stat-block-hd"><span>Nutrition</span><button class="df-link-btn" data-tab="nutrition">track →</button></div>';
   html+='<div class="df-cal-row"><div class="df-cal-num" style="color:var(--accent)">'+t.cal+'</div>';
-  html+='<div class="df-cal-meta"><div class="df-cal-goal">of '+(S.macGoals.calories||2000)+' kcal</div><div class="df-cal-rem">'+(calRemainder>0?calRemainder+' remaining':'goal reached')+'</div></div></div>';
+  html+='<div class="df-cal-meta"><div class="df-cal-goal">of '+calGoalDash+' kcal</div><div class="df-cal-rem">'+(calRemainder>0?calRemainder+' remaining':'goal reached')+'</div></div></div>';
   html+='<div class="df-mini-bar"><div class="df-mini-fill" style="width:'+Math.min(100,calPct)+'%;background:var(--accent)"></div></div>';
   if(mealsForDate(selDate).length){
     html+='<div class="df-macro-row">';
@@ -903,22 +906,8 @@ function tplHourlyCal(){
       +'</div>';
   }
 
-  // Google Calendar section
-  var gcalSection='';
-  if(!S.gcalConnected){
-    gcalSection='<div style="padding:12px 16px;border-top:1px solid var(--border)">'
-      +'<button class="gcal-connect-btn" id="gcal-connect-btn">'
-      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'
-      +'Connect Google Calendar'
-      +'</button>'
-      +'<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:6px;letter-spacing:.3px">Import meetings, events & reminders automatically</div>'
-      +'</div>';
-  } else {
-    gcalSection='<div style="padding:10px 16px;border-top:1px solid var(--border)">'
-      +'<div class="gcal-connected"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Google Calendar synced</div>'
-      +'<button class="btn btn-sm btn-red" id="gcal-disconnect-btn" style="margin-top:8px;width:100%;justify-content:center;display:flex">Disconnect</button>'
-      +'</div>';
-  }
+
+  // (Google Calendar removed)
 
   return '<div class="hourly-cal">'
     +'<div class="hcal-header">'
@@ -931,7 +920,6 @@ function tplHourlyCal(){
     +rows
     +'</div>'
     +'</div>'
-    +gcalSection
     +'</div>';
 }
 
@@ -944,37 +932,158 @@ function scrollHourlyToNow(){
 }
 
 function tplNutrition(){
-  var t=macTotalsForDate(selDate),calPct=pct(t.cal,S.macGoals.calories);
+  var fg=S.fitnessGoal||{mode:'maintain',targetCalories:2000,targetWeight:null,currentWeight:null,weeklyChange:0};
+  var calGoal=fg.targetCalories||S.macGoals.calories||2000;
+  var t=macTotalsForDate(selDate),calPct=pct(t.cal,calGoal);
   var meals=mealsForDate(selDate);
   var isToday=sameDay(selDate,today);
   var dateLabel=isToday?'Today':selDate.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  var calRem=Math.max(0,calGoal-t.cal);
+  var calOver=Math.max(0,t.cal-calGoal);
+
+  // ── Fitness goal mode labels
+  var modeLabels={deficit:'🔥 Cut (Deficit)',maintain:'⚖️ Maintain',surplus:'💪 Bulk (Surplus)'};
+  var modeBtns=['deficit','maintain','surplus'].map(function(m){
+    return'<button class="type-btn '+(fg.mode===m?'on':'off')+' ngoal-mode-btn" data-mode="'+m+'">'+modeLabels[m]+'</button>';
+  }).join('');
+
+  // ── Weekly calorie suggestion based on mode
+  var modeDesc={deficit:'Eat in a calorie deficit to lose ~0.5–1 lb/week',maintain:'Eat at maintenance to keep your current weight',surplus:'Eat in a calorie surplus to gain muscle mass'};
+
+  // ── Meal log by category
   var cats=['Breakfast','Lunch','Dinner','Snack'];
   var mealsByCategory=cats.map(function(cat){
     var items=meals.filter(function(m){return m.meal===cat;});
     if(!items.length) return '';
     var rows=items.map(function(m){
-      return'<div class="meal-row"><div><div class="meal-name">'+esc(m.name)+'</div><div class="meal-sub">'+m.cal+' kcal</div></div>'
-        +'<div class="mtags"><span class="mtag" style="background:rgba(42,106,240,.08);color:#2a6af0">'+m.p+'P</span>'
-        +'<span class="mtag" style="background:rgba(196,125,10,.08);color:#c47d0a">'+m.c+'C</span>'
-        +'<span class="mtag" style="background:rgba(217,64,96,.08);color:#d94060">'+m.f+'F</span>'
-        +'<button class="btn btn-red" data-del-meal="'+m.id+'">✕</button></div></div>';
+      return'<div class="meal-row"><div><div class="meal-name">'+esc(m.name)+'</div><div class="meal-sub">'+m.cal+' kcal · '+m.p+'P · '+m.c+'C · '+m.f+'F</div></div>'
+        +'<button class="btn btn-red" data-del-meal="'+m.id+'">✕</button></div>';
     }).join('');
-    return'<div style="margin-bottom:12px"><div class="section-cat">'+cat+'</div>'+rows+'</div>';
+    return'<div style="margin-bottom:14px"><div class="section-cat">'+cat+'</div>'+rows+'</div>';
   }).join('');
-  var emptyMeals=meals.length===0?'<div class="empty"><div class="empty-icon">◇</div><div class="empty-txt">no meals logged yet<br>scan a photo or add manually</div></div>':'';
-  return'<div style="display:flex;flex-direction:column;gap:12px;max-width:660px">'
-    +'<div class="card"><div class="ch-between">'
-    +'<div style="display:flex;align-items:center;gap:10px"><div class="cicon" style="background:linear-gradient(135deg,rgba(214,62,90,.12),rgba(232,98,42,.08))"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 4-3 6-7 6s-7-2-7-6a7 7 0 0 1 7-7z"/><path d="M5 15h14l-1.5 5.5a2 2 0 0 1-1.93 1.5H8.43a2 2 0 0 1-1.93-1.5L5 15z"/></svg></div>'
-    +'<div><div class="ctitle">Nutrition Tracker</div><div class="csub">'+dateLabel+' · '+t.cal+' / '+S.macGoals.calories+' kcal</div></div></div>'
-    +'<button class="btn btn-sm btn-green" id="open-scan">AI Scan</button></div>'
-    +'<div class="cbar"><div class="cbar-fill" style="width:'+calPct+'%"></div></div>'
-    +'<div class="cbar-lbls"><span>0 kcal</span><span>'+S.macGoals.calories+' kcal goal</span></div>'
-    +(meals.length?'<div class="rings">'+ringsHTML(t)+'</div>':'')
-    +'</div>'
-    +'<div class="card"><div class="ch-between" style="margin-bottom:12px">'
-    +'<div class="ctitle">Meal Log</div>'
-    +'<button class="btn btn-sm" style="background:rgba(42,106,240,.07);color:var(--accent);border:1px solid rgba(42,106,240,.15)" id="open-add-meal">+ add food</button>'
-    +'</div>'+emptyMeals+mealsByCategory+'</div></div>';
+
+  // ── Weight chart (8 weeks of data)
+  var weightPoints=[];
+  var expectedPoints=[];
+  var chartLabels=[];
+  var startWeight=fg.currentWeight||null;
+  var weeklyDelta=fg.mode==='deficit'?-0.75:fg.mode==='surplus'?0.5:0;
+  for(var wi=7;wi>=0;wi--){
+    var wd=new Date(today);wd.setDate(today.getDate()-wi*7);
+    var dk2=dateKey(wd);
+    var wEntry=S.weightByDate&&S.weightByDate[dk2];
+    weightPoints.push(wEntry?wEntry.weight:null);
+    if(startWeight!=null) expectedPoints.push(+(startWeight+(weeklyDelta*(7-wi))).toFixed(1));
+    else expectedPoints.push(null);
+    chartLabels.push(wd.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  }
+  var allWeights=weightPoints.filter(function(v){return v!=null;});
+  var allExpected=expectedPoints.filter(function(v){return v!=null;});
+  var allVals=allWeights.concat(allExpected);
+  var minW=allVals.length?Math.min.apply(null,allVals)-2:50;
+  var maxW=allVals.length?Math.max.apply(null,allVals)+2:200;
+  var chartH=110,chartW=560,padL=38,padR=12,padT=12,padB=28;
+  var plotW=chartW-padL-padR,plotH=chartH-padT-padB;
+  function toX(i){return padL+i*(plotW/(weightPoints.length-1));}
+  function toY(v){return padT+plotH*(1-(v-minW)/(maxW-minW||1));}
+
+  // Build SVG weight chart
+  var weightSVG='<svg viewBox="0 0 '+chartW+' '+chartH+'" style="width:100%;height:auto;overflow:visible">';
+  // Grid lines
+  for(var gi=0;gi<=4;gi++){
+    var gy=padT+gi*(plotH/4);
+    var gv=(maxW-(gi/4)*(maxW-minW)).toFixed(0);
+    weightSVG+='<line x1="'+padL+'" y1="'+gy+'" x2="'+(chartW-padR)+'" y2="'+gy+'" stroke="var(--border)" stroke-width="1"/>';
+    weightSVG+='<text x="'+(padL-4)+'" y="'+(gy+4)+'" text-anchor="end" font-size="9" fill="var(--text3)" font-family="DM Mono,monospace">'+gv+'</text>';
+  }
+  // Expected line (dashed)
+  var expPath='';
+  expectedPoints.forEach(function(v,i){if(v==null)return;expPath+=(expPath===''?'M':'L')+toX(i).toFixed(1)+','+toY(v).toFixed(1);});
+  if(expPath) weightSVG+='<path d="'+expPath+'" fill="none" stroke="var(--green2)" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.7"/>';
+  // Actual line
+  var actPath='',actDots='';
+  weightPoints.forEach(function(v,i){
+    if(v==null)return;
+    actPath+=(actPath===''?'M':'L')+toX(i).toFixed(1)+','+toY(v).toFixed(1);
+    actDots+='<circle cx="'+toX(i).toFixed(1)+'" cy="'+toY(v).toFixed(1)+'" r="4" fill="var(--accent)" stroke="white" stroke-width="1.5"/>';
+  });
+  if(actPath) weightSVG+='<path d="'+actPath+'" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
+  weightSVG+=actDots;
+  // X axis labels (every 2 weeks)
+  weightPoints.forEach(function(v,i){
+    if(i%2===0) weightSVG+='<text x="'+toX(i).toFixed(1)+'" y="'+(chartH-4)+'" text-anchor="middle" font-size="9" fill="var(--text3)" font-family="DM Mono,monospace">'+chartLabels[i]+'</text>';
+  });
+  weightSVG+='</svg>';
+
+  // ── Today's weight entry
+  var todayWeight=weightForDate(selDate);
+  var weightInputVal=todayWeight?todayWeight.weight:'';
+
+  return'<div style="display:flex;flex-direction:column;gap:14px;max-width:680px">'
+
+  // ── Fitness Goal Card ──
+  +'<div class="card">'
+  +'<div class="ch" style="margin-bottom:14px">'
+  +'<div class="cicon" style="background:linear-gradient(135deg,rgba(118,87,214,.15),rgba(29,158,111,.1))">🎯</div>'
+  +'<div><div class="ctitle">Fitness Goal</div><div class="csub">'+modeDesc[fg.mode||'maintain']+'</div></div>'
+  +'</div>'
+  +'<div class="type-btns" style="margin-bottom:14px">'+modeBtns+'</div>'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:4px">'
+  +'<div><label class="flabel" style="margin-top:0">daily cal target</label>'
+  +'<input type="number" id="ng-calories" placeholder="2000" value="'+(fg.targetCalories||'')+'" style="margin:0"/></div>'
+  +'<div><label class="flabel" style="margin-top:0">current weight (lbs)</label>'
+  +'<input type="number" id="ng-curweight" placeholder="175" value="'+(fg.currentWeight||'')+'" style="margin:0"/></div>'
+  +'<div><label class="flabel" style="margin-top:0">target weight (lbs)</label>'
+  +'<input type="number" id="ng-tgtweight" placeholder="165" value="'+(fg.targetWeight||'')+'" style="margin:0"/></div>'
+  +'</div>'
+  +'<button class="btn btn-primary" id="save-fitness-goal" style="margin-top:12px">Save Goal</button>'
+  +'</div>'
+
+  // ── Daily Nutrition Summary ──
+  +'<div class="card card-hero">'
+  +'<div class="ch-between" style="margin-bottom:12px">'
+  +'<div style="display:flex;align-items:center;gap:10px">'
+  +'<div class="cicon" style="background:linear-gradient(135deg,rgba(214,62,90,.12),rgba(232,98,42,.08))"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 4-3 6-7 6s-7-2-7-6a7 7 0 0 1 7-7z"/><path d="M5 15h14l-1.5 5.5a2 2 0 0 1-1.93 1.5H8.43a2 2 0 0 1-1.93-1.5L5 15z"/></svg></div>'
+  +'<div><div class="ctitle">'+dateLabel+'</div>'
+  +'<div class="csub">'+t.cal+' / '+calGoal+' kcal · '+(calOver>0?'<span style="color:var(--red)">'+calOver+' over</span>':calRem+' remaining')+'</div>'
+  +'</div></div></div>'
+  +'<div class="cbar"><div class="cbar-fill" style="width:'+Math.min(100,calPct)+'%;background:'+(calOver>0?'var(--red)':'var(--grd)')+'"></div></div>'
+  +'<div class="cbar-lbls"><span>0</span><span>'+calGoal+' kcal</span></div>'
+  +(meals.length?'<div class="rings" style="margin-top:8px">'+ringsHTML(t)+'</div>':'<div style="text-align:center;padding:10px 0;font-family:var(--mono);font-size:11px;color:var(--text3)">No meals logged yet</div>')
+  +'</div>'
+
+  // ── AI Scan Hero ──
+  +'<div class="card" style="background:linear-gradient(135deg,#1c1510,#2a1f18);border-color:rgba(232,98,42,.3)">'
+  +'<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">'
+  +'<div style="width:44px;height:44px;border-radius:14px;background:var(--grd);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 4px 16px rgba(232,98,42,.4)">📸</div>'
+  +'<div><div style="font-family:var(--display);font-size:16px;font-weight:700;color:#fff;letter-spacing:-.2px">AI Food Scan</div>'
+  +'<div style="font-size:12px;color:rgba(255,255,255,.5);margin-top:2px">Take a photo — AI detects & logs your meal instantly</div>'
+  +'</div></div>'
+  +'<button class="btn btn-primary" id="open-scan" style="background:var(--grd);font-size:14px;padding:13px 20px;box-shadow:0 6px 20px rgba(232,98,42,.45)">📸 Scan My Meal</button>'
+  +'<button class="btn btn-ghost" id="open-add-meal" style="margin-top:8px;color:rgba(255,255,255,.5);border-color:rgba(255,255,255,.12)">+ Add manually</button>'
+  +'</div>'
+
+  // ── Meal Log ──
+  +(meals.length?'<div class="card"><div class="ctitle" style="margin-bottom:14px">Meal Log</div>'+(mealsByCategory||'')+'</div>':'')
+
+  // ── Weight Chart ──
+  +'<div class="card">'
+  +'<div class="ch-between" style="margin-bottom:16px">'
+  +'<div><div class="ctitle">Weight Progress</div>'
+  +'<div class="csub">'+(fg.mode==='deficit'?'Expected -0.75 lbs/week · ':fg.mode==='surplus'?'Expected +0.5 lbs/week · ':'Maintenance · ')
+  +(fg.targetWeight?'Target: '+fg.targetWeight+' lbs':'Set a target weight above')+'</div></div>'
+  +'<div style="display:flex;align-items:center;gap:8px">'
+  +'<input type="number" id="wt-input" placeholder="175 lbs" value="'+weightInputVal+'" style="width:100px;margin:0;padding:7px 10px;font-size:12px"/>'
+  +'<button class="btn btn-sm btn-green" id="log-weight-btn">Log</button>'
+  +'</div></div>'
+  +(allVals.length?weightSVG:'<div class="empty" style="padding:20px 0"><div class="empty-icon">📉</div><div class="empty-txt">Log your weight to see your progress chart<br><span style="opacity:.6">Expected trend will appear once you save a current weight in your goal above</span></div></div>')
+  +(allVals.length?'<div style="display:flex;gap:16px;margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--text3)">'
+  +'<span style="display:flex;align-items:center;gap:5px"><svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--accent)" stroke-width="2.5"/></svg>Logged weight</span>'
+  +(expPath?'<span style="display:flex;align-items:center;gap:5px"><svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--green2)" stroke-width="1.5" stroke-dasharray="5,3"/></svg>Expected trend</span>':'')
+  +'</div>':'')
+  +'</div>'
+
+  +'</div>';
 }
 
 function tplFitness(){
@@ -1151,6 +1260,45 @@ function bindContent(){
   var addMealBtn=document.getElementById('open-add-meal');
   if(addMealBtn)addMealBtn.addEventListener('click',function(){document.getElementById('meal-overlay').style.display='flex';renderMealModal();});
 
+  // Fitness Goal mode buttons
+  document.querySelectorAll('.ngoal-mode-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      if(!S.fitnessGoal) S.fitnessGoal={};
+      S.fitnessGoal.mode=btn.getAttribute('data-mode');
+      var presets={deficit:1600,maintain:2000,surplus:2500};
+      if(!S.fitnessGoal.targetCalories) S.fitnessGoal.targetCalories=presets[S.fitnessGoal.mode];
+      saveState();renderTab();
+    });
+  });
+
+  // Save Fitness Goal
+  var saveFitnessGoalBtn=document.getElementById('save-fitness-goal');
+  if(saveFitnessGoalBtn)saveFitnessGoalBtn.addEventListener('click',function(){
+    if(!S.fitnessGoal) S.fitnessGoal={mode:'maintain'};
+    var cal=parseInt(document.getElementById('ng-calories').value)||2000;
+    var cw=parseFloat(document.getElementById('ng-curweight').value)||null;
+    var tw=parseFloat(document.getElementById('ng-tgtweight').value)||null;
+    S.fitnessGoal.targetCalories=cal;
+    S.fitnessGoal.currentWeight=cw;
+    S.fitnessGoal.targetWeight=tw;
+    S.macGoals=S.macGoals||{};
+    S.macGoals.calories=cal;
+    saveState();showToast('fitness goal saved ✓');renderTab();
+  });
+
+  // Log weight
+  var logWeightBtn=document.getElementById('log-weight-btn');
+  if(logWeightBtn)logWeightBtn.addEventListener('click',function(){
+    var val=parseFloat(document.getElementById('wt-input').value);
+    if(!val||val<=0) return showToast('enter a valid weight');
+    var dk=dateKey(selDate);
+    if(!S.weightByDate) S.weightByDate={};
+    S.weightByDate[dk]={weight:val,unit:'lbs',loggedAt:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})};
+    // Also update currentWeight if logging today
+    if(sameDay(selDate,today)){if(!S.fitnessGoal)S.fitnessGoal={};S.fitnessGoal.currentWeight=val;}
+    saveState();showToast('weight logged: '+val+' lbs');renderTab();
+  });
+
   // Fitness
   document.querySelectorAll('[data-del-session]').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();var dk=dateKey(selDate);if(S.sessionsByDate[dk])S.sessionsByDate[dk]=S.sessionsByDate[dk].filter(function(s){return s.id!==parseInt(btn.getAttribute('data-del-session'));});saveState();showToast('session removed');renderTab();});});
   document.querySelectorAll('[data-stype]').forEach(function(btn){btn.addEventListener('click',function(){S.sessionType=btn.getAttribute('data-stype');renderTab();});});
@@ -1205,11 +1353,6 @@ function bindContent(){
     });
   });
 
-  // Google Calendar connect
-  var gcalConnectBtn=document.getElementById('gcal-connect-btn');
-  if(gcalConnectBtn)gcalConnectBtn.addEventListener('click',function(){doGCalConnect();});
-  var gcalDisconnectBtn=document.getElementById('gcal-disconnect-btn');
-  if(gcalDisconnectBtn)gcalDisconnectBtn.addEventListener('click',function(){S.gcalConnected=false;S.gcalToken=null;saveState();showToast('Google Calendar disconnected');renderTab();});
 }
 
 // ── HOURLY CALENDAR EVENT MODAL ──
@@ -1291,34 +1434,6 @@ function openEventModal(defaultHour, existingEvent){
   }
 
   document.getElementById('ev-cancel').addEventListener('click',function(){document.getElementById('event-overlay').style.display='none';});
-}
-
-// ── GOOGLE CALENDAR OAUTH ──
-function doGCalConnect(){
-  // Initiate OAuth flow via API
-  var CLIENT_ID=window.GOOGLE_CLIENT_ID||'';
-  if(!CLIENT_ID){
-    showToast('Set GOOGLE_CLIENT_ID in Vercel env vars');
-    // For demo/manual: show instructions modal
-    var modal=document.getElementById('event-modal');
-    modal.innerHTML='<div class="modal-title">Connect Google Calendar</div>'
-      +'<div class="modal-sub">To sync your Google Calendar events</div>'
-      +'<div style="background:var(--surface2);border-radius:10px;padding:14px;font-family:var(--mono);font-size:11px;line-height:1.8;color:var(--text2)">'
-      +'1. Go to <strong>Vercel Dashboard → Settings → Environment Variables</strong><br>'
-      +'2. Add <code>GOOGLE_CLIENT_ID</code> from Google Cloud Console<br>'
-      +'3. Add <code>GOOGLE_CLIENT_SECRET</code><br>'
-      +'4. Set redirect URI to <code>https://dayforge.site/api/gcal-callback</code><br>'
-      +'5. Redeploy and try connecting again'
-      +'</div>'
-      +'<button class="mcancel" id="ev-cancel">close</button>';
-    document.getElementById('event-overlay').style.display='flex';
-    document.getElementById('ev-cancel').addEventListener('click',function(){document.getElementById('event-overlay').style.display='none';});
-    return;
-  }
-  var redirectUri=encodeURIComponent(window.location.origin+'/api/gcal-callback');
-  var scope=encodeURIComponent('https://www.googleapis.com/auth/calendar.readonly');
-  var url='https://accounts.google.com/o/oauth2/v2/auth?client_id='+CLIENT_ID+'&redirect_uri='+redirectUri+'&response_type=code&scope='+scope+'&access_type=offline&prompt=consent';
-  window.location.href=url;
 }
 
 // ── STRAVA ──
@@ -1500,16 +1615,6 @@ function init(){
         S.healthByDate[date]={burned:burned,steps:steps,activeMin:activeMin,source:'Apple Health – '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})};
         saveState();window.location.hash='';showToast('Apple Health synced ✓');
       }catch(e){}
-    }
-    // Handle Google Calendar callback
-    var urlParams=new URLSearchParams(window.location.search);
-    if(urlParams.get('gcal')==='connected'){
-      S.gcalConnected=true;
-      S.gcalToken=urlParams.get('token')||'connected';
-      saveState();
-      window.history.replaceState({},'',window.location.pathname);
-      showToast('Google Calendar connected ✓');
-      if(activeTab==='goals') renderTab();
     }
     // Handle Strava callback
     if(urlParams.get('strava')==='connected'){
