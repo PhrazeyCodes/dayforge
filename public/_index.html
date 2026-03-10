@@ -495,7 +495,7 @@ function eventsForDate(d){return(S.calEvents&&S.calEvents[dateKey(d)])||[];}
 function allSessions(){var all=[];Object.values(S.sessionsByDate||{}).forEach(function(arr){all=all.concat(arr||[]);});return all;}
 function healthForDate(d){return(S.healthByDate&&S.healthByDate[dateKey(d)])||{burned:0,steps:0,activeMin:0,source:''};}
 function weightForDate(d){return(S.weightByDate&&S.weightByDate[dateKey(d)])||null;}
-var meals=mealsForDate(d);return meals.reduce(function(a,m){return{p:a.p+m.p,c:a.c+m.c,f:a.f+m.f,cal:a.cal+m.cal};},{p:0,c:0,f:0,cal:0});}
+function macTotalsForDate(d){var meals=mealsForDate(d);return meals.reduce(function(a,m){return{p:a.p+m.p,c:a.c+m.c,f:a.f+m.f,cal:a.cal+m.cal};},{p:0,c:0,f:0,cal:0});}
 
 function loadState(){
   try{
