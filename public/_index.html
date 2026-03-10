@@ -1272,44 +1272,28 @@ function tplFitness(){
   }).join('')
   :'<div class="empty"><span class="empty-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 12h18"/><rect x="2" y="5" width="3" height="14" rx="1.5"/><rect x="19" y="5" width="3" height="14" rx="1.5"/></svg></span><div class="empty-txt">'+(isFuture?'Plan a workout for this day':'No sessions logged yet')+'</div></div>';
 
-  // Strava integration
-  var stravaConnected=!!(S.strava&&S.strava.refresh_token);
-  var stravaOrange='#fc4c02';
-  var stravaCard='<div class="card" style="margin-top:0">'
-    +'<div class="ch-between" style="margin-bottom:12px">'
-    +'<div style="display:flex;align-items:center;gap:8px">'
-    +'<div style="width:32px;height:32px;border-radius:8px;background:#fc4c02;display:flex;align-items:center;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg></div>'
-    +'<div><div class="ctitle" style="font-size:13px">Strava</div><div class="csub">'+(stravaConnected?'Connected':'Not connected')+'</div></div></div>'
-    +(stravaConnected
-      ?'<button class="btn btn-sm" style="background:rgba(252,76,2,.08);color:'+stravaOrange+';border:1px solid rgba(252,76,2,.2)" id="strava-sync-btn">Sync</button>'
-      :'<button class="btn btn-sm" style="background:'+stravaOrange+';color:white" id="strava-connect-btn">Connect</button>')
-    +'</div>';
-  if(stravaConnected){
-    var stravaActivities=(health.stravaActivities&&health.stravaActivities.length)?health.stravaActivities:[];
-    if(stravaActivities.length){
-      stravaCard+=stravaActivities.map(function(a){
-        return'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">'
-          +'<div><span style="font-size:13px;font-weight:600;color:var(--text)">'+esc(a.name)+'</span>'
-          +'<div style="font-family:var(--mono);font-size:10px;color:var(--text3)">'+esc(a.type)+(a.duration?' · '+a.duration+' min':'')+(a.distance?' · '+a.distance+' km':'')+'</div></div>'
-          +'<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:'+stravaOrange+'">'+a.calories+' kcal</span></div>';
-      }).join('');
-    } else {
-      stravaCard+='<div class="empty" style="padding:14px 0"><div class="empty-txt">No activities today &mdash; sync to update</div></div>';
-    }
-  }
-  stravaCard+='</div>';
-
-  // Apple Health manual
-  var appleCard='<div class="card" style="margin-top:0">'
-    +'<div class="ch-between" style="margin-bottom:12px">'
-    +'<div style="display:flex;align-items:center;gap:8px">'
-    +'<div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#ff2d55,#ff6b6b);display:flex;align-items:center;justify-content:center;font-size:16px">❤️</div>'
-    +'<div><div class="ctitle" style="font-size:13px">Apple Health</div><div class="csub">'+(health.source?'Synced · '+esc(health.source):'Manual entry or iPhone Shortcut')+'</div></div></div>'
+  // ── Manual health data (steps + active mins only, no burned since AI handles that)
+  var stepsCard='<div class="card" style="margin-top:0">'
+    +'<div class="ch" style="margin-bottom:12px">'
+    +'<div class="cicon" style="background:linear-gradient(135deg,rgba(29,158,111,.12),rgba(36,196,137,.08))">'
+    +'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4v16"/><path d="M17 8v12"/><path d="M9 12v8"/><path d="M5 16v4"/></svg>'
     +'</div>'
-    +(burned?'<div style="display:flex;gap:16px;margin-bottom:12px"><div class="df-macro"><div class="df-macro-val" style="color:#ff3b30">'+burned+'</div><div class="df-macro-lbl">Burned</div></div>'+(steps?'<div class="df-macro"><div class="df-macro-val">'+steps.toLocaleString()+'</div><div class="df-macro-lbl">Steps</div></div>':'')+(health.activeMin?'<div class="df-macro"><div class="df-macro-val">'+health.activeMin+'</div><div class="df-macro-lbl">Active min</div></div>':'')+'</div>':'')
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><input type="number" id="h-burned" placeholder="Calories burned" style="flex:1;min-width:100px" value="'+(burned||'')+'"/><input type="number" id="h-steps" placeholder="Steps" style="flex:1;min-width:80px" value="'+(steps||'')+'"/><input type="number" id="h-active" placeholder="Active min" style="flex:1;min-width:80px" value="'+(health.activeMin||'')+'" /></div>'
-    +'<button class="btn btn-primary" id="h-save-btn" style="margin-top:10px">Save Health Data</button>'
+    +'<div><div class="ctitle" style="font-size:13px">Daily Activity</div>'
+    +'<div class="csub">Steps & active minutes</div>'
+    +'</div></div>'
+    +(steps||health.activeMin?'<div style="display:flex;gap:16px;margin-bottom:12px">'
+      +(steps?'<div class="df-macro"><div class="df-macro-val" style="color:var(--green)">'+steps.toLocaleString()+'</div><div class="df-macro-lbl">Steps</div></div>':'')
+      +(health.activeMin?'<div class="df-macro"><div class="df-macro-val" style="color:var(--teal)">'+health.activeMin+'</div><div class="df-macro-lbl">Active min</div></div>':'')
+      +'</div>':'')
+    +'<div style="display:flex;gap:8px">'
+    +'<input type="number" id="h-steps" placeholder="Steps" style="flex:1" value="'+(steps||'')+'" />'
+    +'<input type="number" id="h-active" placeholder="Active min" style="flex:1" value="'+(health.activeMin||'')+'" />'
+    +'</div>'
+    +'<button class="btn btn-primary" id="h-save-btn" style="margin-top:10px">Save</button>'
     +'</div>';
+
+  // Keep h-burned as hidden so h-save-btn handler still works
+  var hiddenBurned='<input type="hidden" id="h-burned" value="'+(burned||0)+'"/>';
 
   // Total burned from AI-estimated sessions
   var sessionBurned=daySessions.reduce(function(sum,s){return sum+(s.caloriesBurned||0);},0);
@@ -1339,14 +1323,12 @@ function tplFitness(){
         +'<span>Total: <strong style="color:var(--accent)">'+totalBurned+' kcal</strong></span>'
         +'</div>':'')
       +'</div>':'')
-    +'<div class="grid2">'
-    +stravaCard
-    +appleCard
-    +'</div>'
+    +hiddenBurned
     +'<div class="grid2">'
     +'<div class="card"><div class="ctitle" style="font-size:13px;margin-bottom:10px">This week — Workouts</div><div style="height:90px">'+weekChart+'</div></div>'
     +'<div class="card"><div class="ctitle" style="font-size:13px;margin-bottom:10px">This week — Burned</div><div style="height:90px">'+burnChart+'</div></div>'
     +'</div>'
+    +stepsCard
     +'<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
     +'<div style="display:flex;align-items:center;gap:10px"><div class="cicon" style="background:linear-gradient(135deg,rgba(118,87,214,.12),rgba(160,126,232,.08))"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 12h18"/><rect x="2" y="5" width="3" height="14" rx="1.5"/><rect x="19" y="5" width="3" height="14" rx="1.5"/></svg></div>'
     +'<div><div class="ctitle">Sessions</div><div class="csub">'+dateLabel+' · '+daySessions.length+' session'+(daySessions.length!==1?'s':'')+'</div></div></div>'
@@ -1603,23 +1585,17 @@ function bindContent(){
     });
   });
 
-  // Apple Health save
+  // Activity save (steps + active mins only — calories burned handled by AI estimator)
   var hSaveBtn=document.getElementById('h-save-btn');
   if(hSaveBtn)hSaveBtn.addEventListener('click',function(){
-    var burned2=parseInt(document.getElementById('h-burned').value)||0;
     var steps2=parseInt(document.getElementById('h-steps').value)||0;
     var active=parseInt(document.getElementById('h-active').value)||0;
     var dk=dateKey(selDate);
     if(!S.healthByDate) S.healthByDate={};
-    S.healthByDate[dk]={burned:burned2,steps:steps2,activeMin:active,source:'manual – '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})};
-    saveState();showToast('health data saved ✓');renderTab();
+    var existing=S.healthByDate[dk]||{};
+    S.healthByDate[dk]=Object.assign({},existing,{steps:steps2,activeMin:active,source:'manual'});
+    saveState();showToast('activity saved ✓');renderTab();
   });
-
-  // Strava
-  var stravaConnectBtn=document.getElementById('strava-connect-btn');
-  if(stravaConnectBtn)stravaConnectBtn.addEventListener('click',function(){window.location.href='/api/strava-auth?action=login';});
-  var stravaSyncBtn=document.getElementById('strava-sync-btn');
-  if(stravaSyncBtn)stravaSyncBtn.addEventListener('click',doStravaSync);
 
   // Calendar events
   var addEvtBtn=document.getElementById('add-event-btn');
